@@ -56,6 +56,13 @@ public class CommitSearchHandler implements RequestHandler {
             return;
         }
 
+        // Reject wildcard-only queries (causes Lucene errors)
+        if (isWildcardOnlyQuery(query)) {
+            ResponseWriter.writeError(response, HttpServletResponse.SC_BAD_REQUEST,
+                "Wildcard-only queries are not supported. Please provide a search term.");
+            return;
+        }
+
         String reposParam = request.getParameter("repos");
         if (StringUtils.isEmpty(reposParam)) {
             ResponseWriter.writeError(response, HttpServletResponse.SC_BAD_REQUEST,
@@ -180,5 +187,14 @@ public class CommitSearchHandler implements RequestHandler {
         } catch (NumberFormatException e) {
             return defaultValue;
         }
+    }
+
+    /**
+     * Check if a query consists only of wildcards and whitespace.
+     * Such queries cause Lucene errors and should be rejected.
+     */
+    private boolean isWildcardOnlyQuery(String query) {
+        String stripped = query.replaceAll("[\\s*?]+", "");
+        return stripped.isEmpty();
     }
 }

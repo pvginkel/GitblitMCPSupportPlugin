@@ -12,8 +12,10 @@ import java.util.List;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import org.eclipse.jgit.lib.FileMode;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
+import org.eclipse.jgit.treewalk.TreeWalk;
 
 import com.gitblit.manager.IGitblit;
 import com.gitblit.models.PathModel;
@@ -93,6 +95,17 @@ public class FilesHandler implements RequestHandler {
                 return;
             }
 
+            // If the result is empty and path is not root, verify the path exists
+            // JGitUtils.getFilesInPath returns empty list for both empty directories
+            // and nonexistent paths, so we need to check if the path actually exists
+            if (pathModels.isEmpty() && !path.isEmpty()) {
+                if (!pathExistsInTree(repository, commit, path)) {
+                    ResponseWriter.writeError(response, HttpServletResponse.SC_NOT_FOUND,
+                        "Path not found: " + path);
+                    return;
+                }
+            }
+
             // Separate directories and files, then sort each group
             List<FileListResponse.FileInfo> directories = new ArrayList<>();
             List<FileListResponse.FileInfo> files = new ArrayList<>();
@@ -129,6 +142,27 @@ public class FilesHandler implements RequestHandler {
         } finally {
             if (repository != null) {
                 repository.close();
+            }
+        }
+    }
+
+    /**
+     * Check if a path exists in the repository tree as a directory.
+     */
+    private boolean pathExistsInTree(Repository repository, RevCommit commit, String path) {
+        TreeWalk treeWalk = null;
+        try {
+            treeWalk = TreeWalk.forPath(repository, path, commit.getTree());
+            if (treeWalk == null) {
+                return false;
+            }
+            // Check if it's a directory (tree)
+            return treeWalk.getFileMode(0) == FileMode.TREE;
+        } catch (IOException e) {
+            return false;
+        } finally {
+            if (treeWalk != null) {
+                treeWalk.close();
             }
         }
     }

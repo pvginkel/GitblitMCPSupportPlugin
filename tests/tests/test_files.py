@@ -109,3 +109,25 @@ class TestFilesEndpoint:
         # All entries before first file should be directories
         for i in range(first_file_index):
             assert data["files"][i]["isDirectory"]
+
+    def test_nonexistent_path_returns_404(self, api_client, test_repo):
+        """Test that nonexistent paths return 404 instead of empty list.
+
+        Regression test for issue where nonexistent paths returned {"files": []}
+        instead of a NOT_FOUND error, making it impossible to distinguish between
+        'directory exists but is empty' vs 'directory does not exist'.
+        """
+        response = api_client.files(
+            repo=test_repo,
+            path="nonexistent/path/that/does/not/exist/xyz123"
+        )
+
+        # Should return 404 Not Found
+        assert response.status_code == 404, \
+            f"Nonexistent path should return 404, got {response.status_code}"
+
+        # Should return valid JSON error
+        data = response.json()
+        assert "error" in data, "Response should contain error message"
+        assert "not found" in data["error"].lower(), \
+            f"Error should mention 'not found': {data['error']}"

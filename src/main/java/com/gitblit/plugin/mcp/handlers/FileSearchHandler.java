@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.regex.Pattern;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
@@ -51,6 +52,13 @@ public class FileSearchHandler implements RequestHandler {
             return;
         }
 
+        // Reject wildcard-only queries (causes Lucene errors)
+        if (isWildcardOnlyQuery(query)) {
+            ResponseWriter.writeError(response, HttpServletResponse.SC_BAD_REQUEST,
+                "Wildcard-only queries are not supported. Please provide a search term.");
+            return;
+        }
+
         // Parse optional parameters
         String reposParam = request.getParameter("repos");
         String pathPattern = request.getParameter("pathPattern");
@@ -68,14 +76,18 @@ public class FileSearchHandler implements RequestHandler {
         // Add the user's query
         luceneQuery.append(" AND (").append(query).append(")");
 
-        // Add path pattern if provided
-        if (!StringUtils.isEmpty(pathPattern)) {
-            luceneQuery.append(" AND path:").append(pathPattern);
-        }
+        // Note: pathPattern is applied as post-filter because Lucene wildcard queries
+        // with leading wildcards (like *.java) cause errors in Gitblit's highlighting code
 
         // Add branch filter if provided
         if (!StringUtils.isEmpty(branch)) {
             luceneQuery.append(" AND branch:\"").append(branch).append("\"");
+        }
+
+        // Compile path pattern for post-filtering
+        Pattern pathRegex = null;
+        if (!StringUtils.isEmpty(pathPattern)) {
+            pathRegex = globToRegex(pathPattern);
         }
 
         // Determine repositories to search
@@ -87,24 +99,43 @@ public class FileSearchHandler implements RequestHandler {
             return;
         }
 
-        // Execute search
+        // Execute search - fetch more results if filtering to ensure we get enough matches
         String finalQuery = luceneQuery.toString();
-        log.info("File search: user={}, query='{}', repos={}", user.username, finalQuery, searchRepos.size());
+        log.info("File search: user={}, query='{}', repos={}, pathPattern='{}'",
+                 user.username, finalQuery, searchRepos.size(), pathPattern);
 
-        List<SearchResult> results = gitblit.search(finalQuery, 1, count, searchRepos);
+        int fetchCount = (pathRegex != null) ? count * 4 : count;  // Fetch extra when filtering
+        if (fetchCount > MAX_COUNT) fetchCount = MAX_COUNT;
+
+        List<SearchResult> results = gitblit.search(finalQuery, 1, fetchCount, searchRepos);
 
         // Build response
         FileSearchResponse searchResponse = new FileSearchResponse();
         searchResponse.query = finalQuery;
-        searchResponse.totalCount = results.isEmpty() ? 0 : results.get(0).totalHits;
-        searchResponse.limitHit = searchResponse.totalCount > count;
         searchResponse.results = new ArrayList<>();
+
+        // Track filtered count when using pathPattern
+        int filteredCount = 0;
+        boolean stoppedEarly = false;
 
         // Process each result
         for (SearchResult sr : results) {
             // Only include blob results
             if (sr.type != SearchObjectType.blob) {
                 continue;
+            }
+
+            // Apply path pattern filter
+            if (pathRegex != null && !pathRegex.matcher(sr.path).matches()) {
+                continue;
+            }
+
+            filteredCount++;
+
+            // Stop adding results if we have enough
+            if (searchResponse.results.size() >= count) {
+                stoppedEarly = true;
+                continue;  // Keep counting filtered results
             }
 
             FileSearchResponse.FileSearchResult fileResult = new FileSearchResponse.FileSearchResult();
@@ -125,6 +156,17 @@ public class FileSearchHandler implements RequestHandler {
             }
 
             searchResponse.results.add(fileResult);
+        }
+
+        // Set totalCount and limitHit based on filtering
+        if (pathRegex != null) {
+            // When filtering, use the filtered count
+            searchResponse.totalCount = filteredCount;
+            searchResponse.limitHit = stoppedEarly;
+        } else {
+            // Without filtering, use Lucene's total
+            searchResponse.totalCount = results.isEmpty() ? 0 : results.get(0).totalHits;
+            searchResponse.limitHit = searchResponse.totalCount > count;
         }
 
         ResponseWriter.writeJson(response, searchResponse);
@@ -247,5 +289,50 @@ public class FileSearchHandler implements RequestHandler {
         } catch (NumberFormatException e) {
             return defaultValue;
         }
+    }
+
+    /**
+     * Convert a glob pattern to a regex Pattern.
+     * Supports * (any chars) and ? (single char) wildcards.
+     */
+    private Pattern globToRegex(String glob) {
+        StringBuilder regex = new StringBuilder();
+        for (int i = 0; i < glob.length(); i++) {
+            char c = glob.charAt(i);
+            switch (c) {
+                case '*':
+                    regex.append(".*");
+                    break;
+                case '?':
+                    regex.append(".");
+                    break;
+                case '.':
+                case '(':
+                case ')':
+                case '[':
+                case ']':
+                case '{':
+                case '}':
+                case '\\':
+                case '^':
+                case '$':
+                case '|':
+                case '+':
+                    regex.append("\\").append(c);
+                    break;
+                default:
+                    regex.append(c);
+            }
+        }
+        return Pattern.compile(regex.toString(), Pattern.CASE_INSENSITIVE);
+    }
+
+    /**
+     * Check if a query consists only of wildcards and whitespace.
+     * Such queries cause Lucene errors and should be rejected.
+     */
+    private boolean isWildcardOnlyQuery(String query) {
+        String stripped = query.replaceAll("[\\s*?]+", "");
+        return stripped.isEmpty();
     }
 }

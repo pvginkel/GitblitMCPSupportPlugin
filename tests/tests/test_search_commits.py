@@ -153,3 +153,25 @@ class TestCommitSearchEndpoint:
         data = response.json()
         # Query should include user's search terms
         assert "bug fix" in data["query"]
+
+    def test_wildcard_only_query_returns_error(self, api_client, indexed_repo):
+        """Test that wildcard-only queries return a 400 error instead of crashing.
+
+        Regression test for issue where query='*' caused a Lucene error and
+        returned an HTML error page instead of JSON.
+        """
+        # Test various wildcard-only patterns
+        wildcard_queries = ["*", "?", "* *", "**", "*?*"]
+
+        for query in wildcard_queries:
+            response = api_client.search_commits(query=query, repos=indexed_repo)
+
+            # Should return 400 Bad Request, not 500
+            assert response.status_code == 400, \
+                f"Query '{query}' should return 400, got {response.status_code}"
+
+            # Should return valid JSON error
+            data = response.json()
+            assert "error" in data, f"Query '{query}' should return JSON error"
+            assert "wildcard" in data["error"].lower(), \
+                f"Error message should mention wildcard: {data['error']}"
