@@ -85,11 +85,12 @@ def api_client(session, api_url):
                 params["count"] = count
             return self.get("search/files", params)
 
-        def search_commits(self, repos, message_terms=None, authors=None, branch=None, count=None):
+        def search_commits(self, query, repos, authors=None, branch=None, count=None):
             """GET /search/commits endpoint."""
-            params = {"repos": repos if isinstance(repos, str) else ",".join(repos)}
-            if message_terms:
-                params["messageTerms"] = message_terms if isinstance(message_terms, str) else ",".join(message_terms)
+            params = {
+                "query": query,
+                "repos": repos if isinstance(repos, str) else ",".join(repos)
+            }
             if authors:
                 params["authors"] = authors if isinstance(authors, str) else ",".join(authors)
             if branch:

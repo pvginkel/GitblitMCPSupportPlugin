@@ -48,7 +48,14 @@ public class CommitSearchHandler implements RequestHandler {
     public void handle(HttpServletRequest request, HttpServletResponse response,
                        IGitblit gitblit, UserModel user) throws IOException {
 
-        // Parse required parameter
+        // Parse required parameters
+        String query = request.getParameter("query");
+        if (StringUtils.isEmpty(query)) {
+            ResponseWriter.writeError(response, HttpServletResponse.SC_BAD_REQUEST,
+                "Missing required parameter: query");
+            return;
+        }
+
         String reposParam = request.getParameter("repos");
         if (StringUtils.isEmpty(reposParam)) {
             ResponseWriter.writeError(response, HttpServletResponse.SC_BAD_REQUEST,
@@ -57,17 +64,9 @@ public class CommitSearchHandler implements RequestHandler {
         }
 
         // Parse optional parameters
-        String messageTerms = request.getParameter("messageTerms");
         String authors = request.getParameter("authors");
         String branch = request.getParameter("branch");
         int count = parseIntParam(request, "count", DEFAULT_COUNT);
-
-        // Require at least one search criterion
-        if (StringUtils.isEmpty(messageTerms) && StringUtils.isEmpty(authors)) {
-            ResponseWriter.writeError(response, HttpServletResponse.SC_BAD_REQUEST,
-                "At least one of messageTerms or authors must be provided");
-            return;
-        }
 
         // Cap count
         if (count < 1) count = DEFAULT_COUNT;
@@ -77,18 +76,10 @@ public class CommitSearchHandler implements RequestHandler {
         StringBuilder luceneQuery = new StringBuilder();
         luceneQuery.append("type:commit");
 
-        // Add message terms (OR logic)
-        if (!StringUtils.isEmpty(messageTerms)) {
-            String[] terms = messageTerms.split(",");
-            luceneQuery.append(" AND (");
-            for (int i = 0; i < terms.length; i++) {
-                if (i > 0) luceneQuery.append(" OR ");
-                luceneQuery.append(terms[i].trim());
-            }
-            luceneQuery.append(")");
-        }
+        // Add the user's query
+        luceneQuery.append(" AND (").append(query).append(")");
 
-        // Add authors (OR logic)
+        // Add authors filter (OR logic)
         if (!StringUtils.isEmpty(authors)) {
             String[] authorList = authors.split(",");
             luceneQuery.append(" AND (");

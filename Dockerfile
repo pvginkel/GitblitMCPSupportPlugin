@@ -11,7 +11,7 @@ RUN mvn install:install-file -Dfile=/tmp/gitblit-1.10.0.jar -DpomFile=/tmp/gitbl
 # Copy pom.xml and source, then build
 COPY pom.xml .
 COPY src ./src
-RUN mvn clean package -q -DskipTests
+RUN mvn clean package -DskipTests
 
 # Final stage - minimal image with just the plugin
 FROM busybox:latest
