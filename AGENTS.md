@@ -52,14 +52,14 @@ poetry run pytest tests/test_repos.py  # Specific file
 GITBLIT_URL=http://localhost:8080 poetry run pytest
 ```
 
-Default test server: `http://10.1.2.3:8080`
+Default test server: `http://10.1.2.3`
 
 ## Project Structure
 
 ```
 src/main/java/com/gitblit/plugin/mcp/
 ├── MCPSupportPlugin.java      # Plugin entry point (PF4J)
-├── MCPApiFilter.java          # HTTP filter/router for /api/mcp-server/*
+├── MCPApiFilter.java          # HTTP filter/router for /api/.mcp-internal/*
 ├── handlers/
 │   ├── RequestHandler.java    # Handler interface
 │   ├── ReposHandler.java      # GET /repos
@@ -74,15 +74,15 @@ src/main/java/com/gitblit/plugin/mcp/
 
 ## API Endpoints
 
-Base path: `/api/mcp-server`
+Base path: `/api/.mcp-internal`
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/repos` | GET | List repositories (params: query, limit, after) |
-| `/files` | GET | List files in repo (params: repo, path, revision) |
-| `/file` | GET | Read file content (params: repo, path, revision, startLine, endLine) |
-| `/search/files` | GET | Search file contents (params: query, repos, pathPattern, branch, count) |
-| `/search/commits` | GET | Search commits (params: query, repos, authors, branch, count) |
+| Endpoint          | Method | Description                                                             |
+|-------------------|--------|-------------------------------------------------------------------------|
+| `/repos`          | GET    | List repositories (params: query, limit, after)                         |
+| `/files`          | GET    | List files in repo (params: repo, path, revision)                       |
+| `/file`           | GET    | Read file content (params: repo, path, revision, startLine, endLine)    |
+| `/search/files`   | GET    | Search file contents (params: query, repos, pathPattern, branch, count) |
+| `/search/commits` | GET    | Search commits (params: query, repos, authors, branch, count)           |
 
 ## Key Patterns
 

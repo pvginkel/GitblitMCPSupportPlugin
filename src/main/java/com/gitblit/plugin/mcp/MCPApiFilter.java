@@ -35,7 +35,7 @@ import com.gitblit.servlet.GitblitContext;
 public class MCPApiFilter extends HttpRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(MCPApiFilter.class);
-    private static final String API_PATH = "/api/mcp-server";
+    private static final String API_PATH = "/api/.mcp-internal";
 
     // Handlers
     private final RequestHandler reposHandler;
@@ -107,7 +107,7 @@ public class MCPApiFilter extends HttpRequestFilter {
             user = UserModel.ANONYMOUS;
         }
 
-        // Extract endpoint path (after /api/mcp-server)
+        // Extract endpoint path (after /api/.mcp-internal)
         String uri = request.getRequestURI();
         String endpoint = uri.substring(API_PATH.length());
 

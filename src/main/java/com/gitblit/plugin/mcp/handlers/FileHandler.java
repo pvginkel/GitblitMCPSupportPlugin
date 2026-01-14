@@ -20,7 +20,7 @@ import com.gitblit.utils.JGitUtils;
 import com.gitblit.utils.StringUtils;
 
 /**
- * Handler for GET /api/mcp-server/file
+ * Handler for GET /api/.mcp-internal/file
  * Reads file content from a repository.
  */
 public class FileHandler implements RequestHandler {

@@ -1,5 +1,5 @@
 """
-Tests for GET /api/mcp-server/search/commits endpoint.
+Tests for GET /api/.mcp-internal/search/commits endpoint.
 """
 import pytest
 

@@ -1,6 +1,7 @@
 """
 Pytest configuration and fixtures for MCP Support Plugin tests.
 """
+
 import os
 import pytest
 import requests
@@ -9,13 +10,13 @@ import requests
 @pytest.fixture(scope="session")
 def base_url():
     """Base URL for the Gitblit server."""
-    return os.environ.get("GITBLIT_URL", "http://10.1.2.3:8080")
+    return os.environ.get("GITBLIT_URL", "http://10.1.2.3")
 
 
 @pytest.fixture(scope="session")
 def api_url(base_url):
     """Base URL for the MCP API."""
-    return f"{base_url}/api/mcp-server"
+    return f"{base_url}/api/.mcp-internal"
 
 
 @pytest.fixture(scope="session")
@@ -30,6 +31,7 @@ def session():
 @pytest.fixture(scope="session")
 def api_client(session, api_url):
     """API client helper."""
+
     class APIClient:
         def __init__(self, session, base_url):
             self.session = session
@@ -72,7 +74,9 @@ def api_client(session, api_url):
                 params["endLine"] = end_line
             return self.get("file", params)
 
-        def search_files(self, query, repos=None, path_pattern=None, branch=None, count=None):
+        def search_files(
+            self, query, repos=None, path_pattern=None, branch=None, count=None
+        ):
             """GET /search/files endpoint."""
             params = {"query": query}
             if repos:
@@ -89,10 +93,12 @@ def api_client(session, api_url):
             """GET /search/commits endpoint."""
             params = {
                 "query": query,
-                "repos": repos if isinstance(repos, str) else ",".join(repos)
+                "repos": repos if isinstance(repos, str) else ",".join(repos),
             }
             if authors:
-                params["authors"] = authors if isinstance(authors, str) else ",".join(authors)
+                params["authors"] = (
+                    authors if isinstance(authors, str) else ",".join(authors)
+                )
             if branch:
                 params["branch"] = branch
             if count:

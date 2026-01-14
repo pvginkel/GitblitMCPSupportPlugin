@@ -27,7 +27,7 @@ import com.gitblit.utils.ArrayUtils;
 import com.gitblit.utils.StringUtils;
 
 /**
- * Handler for GET /api/mcp-server/search/commits
+ * Handler for GET /api/.mcp-internal/search/commits
  * Searches commit history using Lucene index.
  */
 public class CommitSearchHandler implements RequestHandler {

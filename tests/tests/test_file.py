@@ -1,5 +1,5 @@
 """
-Tests for GET /api/mcp-server/file endpoint.
+Tests for GET /api/.mcp-internal/file endpoint.
 """
 import pytest
 

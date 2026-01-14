@@ -22,7 +22,7 @@ import com.gitblit.plugin.mcp.util.ResponseWriter;
 import com.gitblit.utils.StringUtils;
 
 /**
- * Handler for GET /api/mcp-server/repos
+ * Handler for GET /api/.mcp-internal/repos
  * Lists repositories accessible to the authenticated user.
  */
 public class ReposHandler implements RequestHandler {

@@ -30,7 +30,7 @@ poetry run pytest tests/test_repos.py::TestReposEndpoint::test_list_all_repos
 The test suite connects to a Gitblit server. Configure the URL via environment variable:
 
 ```bash
-export GITBLIT_URL=http://10.1.2.3:8080
+export GITBLIT_URL=http://10.1.2.3
 poetry run pytest
 ```
 
@@ -38,8 +38,8 @@ Or set it in `pyproject.toml` under `[tool.pytest.ini_options]`.
 
 ## Test Coverage
 
-- **test_repos.py** - Tests for `GET /api/mcp-server/repos`
-- **test_files.py** - Tests for `GET /api/mcp-server/files`
-- **test_file.py** - Tests for `GET /api/mcp-server/file`
-- **test_search_files.py** - Tests for `GET /api/mcp-server/search/files`
-- **test_search_commits.py** - Tests for `GET /api/mcp-server/search/commits`
+- **test_repos.py** - Tests for `GET /api/.mcp-internal/repos`
+- **test_files.py** - Tests for `GET /api/.mcp-internal/files`
+- **test_file.py** - Tests for `GET /api/.mcp-internal/file`
+- **test_search_files.py** - Tests for `GET /api/.mcp-internal/search/files`
+- **test_search_commits.py** - Tests for `GET /api/.mcp-internal/search/commits`

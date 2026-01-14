@@ -23,7 +23,7 @@ Copy the ZIP to your Gitblit plugins directory and restart Gitblit.
 
 ## API Endpoints
 
-Base path: `/api/mcp-server`
+Base path: `/api/.mcp-internal`
 
 ### GET /repos
 

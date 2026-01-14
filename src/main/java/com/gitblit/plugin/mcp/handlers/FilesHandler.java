@@ -27,7 +27,7 @@ import com.gitblit.utils.JGitUtils;
 import com.gitblit.utils.StringUtils;
 
 /**
- * Handler for GET /api/mcp-server/files
+ * Handler for GET /api/.mcp-internal/files
  * Lists files and directories at a path within a repository.
  */
 public class FilesHandler implements RequestHandler {

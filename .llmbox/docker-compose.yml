@@ -1,0 +1,26 @@
+services:
+  llmbox:
+    image: registry:5000/llmbox:latest
+    network_mode: host
+    pid: host
+    working_dir: /work/plugin
+    tty: true
+    user: "${UID}:${GID}"
+    environment:
+      TERM: ${TERM}
+      COLORTERM: ${COLORTERM}
+    volumes:
+      - ${HOME}/.claude.json:/home/ubuntu/.claude.json:rw
+      - ${HOME}/.claude:/home/ubuntu/.claude:rw
+      - ${HOME}/.codex:/home/ubuntu/.codex:rw
+      - ${HOME}/.vimrc:/home/ubuntu/.vimrc:ro
+      - ${HOME}/.gitconfig:/home/ubuntu/.gitconfig:ro
+      - ${HOME}/.cache:/home/ubuntu/.cache:rw
+      - ${HOME}/.happy:/home/ubuntu/.happy:rw
+      - ../server:/work/server:rw
+      - ../server/.git:/work/server/.git:ro
+      - ../plugin:/work/plugin:rw
+      - ../plugin/.git:/work/plugin/.git:ro
+      - ../gitblit:/work/gitblit:ro
+    # Required for Chromium
+    shm_size: 1G

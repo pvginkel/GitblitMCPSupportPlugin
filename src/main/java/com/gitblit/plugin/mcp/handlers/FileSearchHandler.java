@@ -29,7 +29,7 @@ import com.gitblit.utils.JGitUtils;
 import com.gitblit.utils.StringUtils;
 
 /**
- * Handler for GET /api/mcp-server/search/files
+ * Handler for GET /api/.mcp-internal/search/files
  * Searches file contents using Lucene index.
  */
 public class FileSearchHandler implements RequestHandler {
