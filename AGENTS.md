@@ -8,6 +8,7 @@ GitblitSearchApiPlugin is a Gitblit plugin that provides REST API endpoints for 
 - List repositories accessible to authenticated users with filtering and pagination
 - List files/directories at a specific path in a repository
 - Read file content with line range support (max 128KB)
+- Find files by glob pattern using Git tree walking
 - Full-text search of file contents using Lucene indexes
 - Commit history search with filtering by author and message
 
@@ -65,6 +66,7 @@ src/main/java/com/gitblit/plugin/mcp/
 │   ├── ReposHandler.java      # GET /repos
 │   ├── FilesHandler.java      # GET /files
 │   ├── FileHandler.java       # GET /file
+│   ├── FindFilesHandler.java  # GET /find
 │   ├── FileSearchHandler.java # GET /search/files
 │   └── CommitSearchHandler.java # GET /search/commits
 ├── model/                     # Response DTOs for JSON serialization
@@ -81,6 +83,7 @@ Base path: `/api/.mcp-internal`
 | `/repos`          | GET    | List repositories (params: query, limit, after)                         |
 | `/files`          | GET    | List files in repo (params: repo, path, revision)                       |
 | `/file`           | GET    | Read file content (params: repo, path, revision, startLine, endLine)    |
+| `/find`           | GET    | Find files by glob pattern (params: pathPattern, repos, revision, limit) |
 | `/search/files`   | GET    | Search file contents (params: query, repos, pathPattern, branch, count, contextLines) |
 | `/search/commits` | GET    | Search commits (params: query, repos, authors, branch, count)           |
 
@@ -100,8 +103,8 @@ Base path: `/api/.mcp-internal`
 
 ## Important Constants
 
-- `DEFAULT_LIMIT = 50` - Default pagination limit
-- `MAX_LIMIT = 100` - Maximum pagination limit
+- `DEFAULT_LIMIT = 50` - Default pagination/result limit
+- `MAX_LIMIT = 100` - Maximum pagination limit (repos, files); 200 for /find endpoint
 - `DEFAULT_COUNT = 25` - Default search results count
 - `MAX_COUNT = 100` - Maximum search results count
 - `MAX_FILE_SIZE = 128 * 1024` - Maximum file size for reading (128KB)

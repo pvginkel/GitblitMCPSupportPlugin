@@ -108,4 +108,15 @@ def api_client(session, api_url):
                 params["count"] = count
             return self.get("search/commits", params)
 
+        def find(self, path_pattern, repos=None, revision=None, limit=None):
+            """GET /find endpoint."""
+            params = {"pathPattern": path_pattern}
+            if repos:
+                params["repos"] = repos if isinstance(repos, str) else ",".join(repos)
+            if revision:
+                params["revision"] = revision
+            if limit:
+                params["limit"] = limit
+            return self.get("find", params)
+
     return APIClient(session, api_url)

@@ -26,6 +26,7 @@ import com.gitblit.plugin.mcp.handlers.CommitSearchHandler;
 import com.gitblit.plugin.mcp.handlers.FileHandler;
 import com.gitblit.plugin.mcp.handlers.FileSearchHandler;
 import com.gitblit.plugin.mcp.handlers.FilesHandler;
+import com.gitblit.plugin.mcp.handlers.FindFilesHandler;
 import com.gitblit.plugin.mcp.handlers.ReposHandler;
 import com.gitblit.plugin.mcp.handlers.RequestHandler;
 import com.gitblit.plugin.mcp.util.ResponseWriter;
@@ -43,6 +44,7 @@ public class MCPApiFilter extends HttpRequestFilter {
     private final RequestHandler fileHandler;
     private final RequestHandler fileSearchHandler;
     private final RequestHandler commitSearchHandler;
+    private final RequestHandler findFilesHandler;
 
     public MCPApiFilter() {
         this.reposHandler = new ReposHandler();
@@ -50,6 +52,7 @@ public class MCPApiFilter extends HttpRequestFilter {
         this.fileHandler = new FileHandler();
         this.fileSearchHandler = new FileSearchHandler();
         this.commitSearchHandler = new CommitSearchHandler();
+        this.findFilesHandler = new FindFilesHandler();
     }
 
     @Override
@@ -143,6 +146,8 @@ public class MCPApiFilter extends HttpRequestFilter {
                 return filesHandler;
             case "file":
                 return fileHandler;
+            case "find":
+                return findFilesHandler;
             case "search/files":
                 return fileSearchHandler;
             case "search/commits":
