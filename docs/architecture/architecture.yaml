@@ -1,0 +1,56 @@
+schemaVersion: "0.1"
+producer: gitblit-initializer
+
+# Gitblit MCP Support Plugin (image: registry:5000/gitblit-initializer). A Gitblit
+# plugin (Java/Maven) that installs a servlet filter exposing an internal REST API
+# under /api/.mcp-internal (repos, files, file, find-files, file-search,
+# commit-search). The gitblit-mcp-server consumes this surface. The plugin runs
+# inside the Gitblit instance (ss:gitblit, resolved from the published dataset).
+
+applicationComponents:
+  - id: app:gitblit-initializer,0a82a73f-fb29-4aea-91aa-96b9cc594905
+    label: Gitblit MCP Support Plugin
+    summary: >-
+      Gitblit plugin adding an internal REST API (/api/.mcp-internal) used by the
+      Gitblit MCP server to read repositories, files, and history. Packaged as the
+      gitblit-initializer image.
+    introduced: 2026-01-12
+    lifecycle: active
+    stereotype: SoftwareProduct
+    sourceRepository: git:pvginkel/GitblitMCPSupportPlugin
+    stats:
+      image: registry:5000/gitblit-initializer
+
+applicationServices:
+  - id: svc:gitblit-mcp-internal-api,5126f577-e588-4990-8539-44ade200a0a5
+    label: Gitblit MCP internal API
+    summary: >-
+      Internal REST surface under /api/.mcp-internal exposing repo/file/commit
+      read endpoints to the Gitblit MCP server, authenticated as the calling user.
+    introduced: 2026-01-12
+    lifecycle: active
+
+applicationInterfaces:
+  - id: if:gitblit-mcp-internal,087c477f-3837-4262-849a-24535abd50eb
+    label: MCP server consumer surface
+    summary: The /api/.mcp-internal endpoints consumed by the Gitblit MCP server.
+    introduced: 2026-01-12
+    lifecycle: active
+
+relations:
+  - id: rel:gitblit-initializer-realizes-internal-api
+    source: app:gitblit-initializer,0a82a73f-fb29-4aea-91aa-96b9cc594905
+    target: svc:gitblit-mcp-internal-api,5126f577-e588-4990-8539-44ade200a0a5
+    type: Realization
+
+  - id: rel:mcp-internal-if-on-api
+    source: if:gitblit-mcp-internal,087c477f-3837-4262-849a-24535abd50eb
+    target: svc:gitblit-mcp-internal-api,5126f577-e588-4990-8539-44ade200a0a5
+    type: Assignment
+
+  # The plugin runs inside the Gitblit instance (cross-producer ss:gitblit,
+  # resolved by UUID from the published dataset).
+  - id: rel:gitblit-serves-mcp-plugin
+    source: ss:gitblit,5b20c5e2-f7a9-5260-b290-fcaafadbb786
+    target: app:gitblit-initializer,0a82a73f-fb29-4aea-91aa-96b9cc594905
+    type: Serving
