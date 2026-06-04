@@ -2,7 +2,7 @@
 // Source of truth: the hand-authored docs/architecture/*.yaml in this repo.
 // The agent needs outbound HTTPS to architecture.webathome.org for validation.
 
-library('JenkinsPipelineUtils') _
+library identifier: 'JenkinsPipelineUtils', changelog: false
 
 podTemplate(inheritFrom: 'jenkins-agent', containers: [
     containerTemplates.python('python')
