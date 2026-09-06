@@ -1,0 +1,26 @@
+# Curated automation for the Gitblit MCP Support Plugin.
+# Schema: https://kubecoder.home/help/reference/project-yaml/
+#
+# Deliberately minimal: written by the GitblitMCPServer onboarding run, whose
+# environment clones this repo alongside it, so that the plugin is buildable
+# from there. This repo gets its own onboarding run for the rest (its own
+# config.yaml, the legacy .vscode task, the docs sweep).
+
+projects:
+  root:
+    description: >-
+      Gitblit MCP Support Plugin — a Java/Maven Gitblit plugin serving the
+      /api/.mcp-internal REST API that the Gitblit MCP server adapts to MCP.
+    # The image build (registry:5000/gitblit-initializer).
+    # AaC/GitblitMCPSupportPlugin is this repo's second Jenkins job: the
+    # architecture-as-code producer that runs Jenkinsfile.architecture.
+    jenkins: Gitblit/GitblitMCPSupportPlugin
+    # Gitblit 1.10.0 is in no public Maven repository, so its JAR ships in lib/
+    # and is seeded into the local repository before the build can resolve it —
+    # the same step the Dockerfile runs. Re-running it is idempotent.
+    setup: cexec java mvn install:install-file -Dfile=lib/gitblit-1.10.0.jar -DpomFile=lib/gitblit-1.10.0.pom -q
+    build: cexec java mvn clean package -DskipTests
+    # No `test:`. tests/ is a pytest suite that drives this plugin's REST API
+    # over HTTP against a running Gitblit with the plugin deployed, and no
+    # KubeCoder environment has one. CI builds with -DskipTests for the same
+    # reason, and src/ carries no Java tests of its own.
