@@ -1,0 +1,31 @@
+# The image build context. The Dockerfile COPYs only lib/, pom.xml and src/,
+# so everything below is streamed to the builder for nothing.
+#
+# Jenkins builds from a clean clone, where most of this does not exist, which
+# is why it never noticed; a KubeCoder checkout has .git, a Maven target/ and
+# the pytest suite in it, and `kaniko` tars the context where it stands.
+
+# Version control — 3.8 MiB of it, half the context on its own.
+.git
+.gitignore
+
+# Build output. `mvn clean package` rebuilds it inside the image anyway.
+target
+
+# The pytest suite that drives a live Gitblit, and its Poetry lockfile.
+tests
+__pycache__
+
+# Docs, CI and editor/environment config.
+docs
+scripts
+.vscode
+.kubecoder
+Jenkinsfile
+Jenkinsfile.architecture
+README.md
+AGENTS.md
+CLAUDE.md
+
+# Onboarding scratch note, untracked.
+ONBOARDING-STATE.md
