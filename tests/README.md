@@ -2,14 +2,22 @@
 
 Test suite for the Gitblit MCP Support Plugin REST API.
 
+The suite drives the API over HTTP against a **running Gitblit with this plugin
+deployed**. There is no such server in a KubeCoder environment, so the suite is
+not part of `kc project test` — there is no `test:` verb — and it has to be
+pointed at a Gitblit you can reach.
+
 ## Setup
 
 ```bash
 cd tests
-poetry install
+cexec python poetry install   # or plain `poetry install` outside KubeCoder
 ```
 
 ## Running Tests
+
+Inside a KubeCoder environment, every `poetry` command below needs a
+`cexec python` prefix, because Poetry lives in the `python` tool container.
 
 ```bash
 # Run all tests

@@ -4,18 +4,20 @@ A Gitblit plugin that provides REST API endpoints for the Gitblit MCP Server int
 
 ## Building
 
-Build using Docker:
+Requires JDK 8 or later and Maven. Gitblit 1.10.0 is in no public Maven
+repository, so its JAR ships in `lib/` and has to be seeded into the local
+repository before the build can resolve it:
 
 ```bash
-./scripts/build.sh
+mvn install:install-file -Dfile=lib/gitblit-1.10.0.jar -DpomFile=lib/gitblit-1.10.0.pom
+mvn clean package -DskipTests
 ```
 
-The plugin ZIP will be available in the Docker image at `/plugins/mcp-support-plugin-1.0.0.zip`.
+The plugin ZIP is written to `target/mcp-support-plugin-1.0.0.zip`.
 
-To extract:
-```bash
-docker run --rm gitblit-initializer:latest cat /plugins/mcp-support-plugin-1.0.0.zip > mcp-support-plugin-1.0.0.zip
-```
+In a KubeCoder environment both steps are curated verbs — `kc project setup`
+and `kc project build`, from the repository root — and Maven runs in the `java`
+tool container.
 
 ## Installation
 

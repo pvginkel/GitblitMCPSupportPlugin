@@ -18,42 +18,54 @@ GitblitSearchApiPlugin is a Gitblit plugin that provides REST API endpoints for 
 - **Gitblit 1.10.0** - Plugin platform
 - **PF4J 0.9.0** - Plugin Framework for Java
 - **Maven 3.9** - Build tool
-- **Docker** - Containerized builds
+- **Dockerfile** - Built in CI with kaniko into the `registry:5000/gitblit-initializer` image
 - **Gson** - JSON serialization
 - **JGit 4.11.9** - Git repository operations
 
 ## Build Commands
 
+Maven lives in the `java` tool container. The curated entry points are in
+`.kubecoder/project.yaml`; prefer them over ad-hoc commands, and run them from
+the repository root:
+
 ```bash
-# Build Docker image containing the plugin ZIP
-./scripts/build.sh
+kc project setup   # seed the Gitblit JAR into the local Maven repository
+kc project build   # cexec java mvn clean package -DskipTests
+kc project lint    # validate the architecture-as-code artifact
+```
 
-# Extract plugin from Docker image
-docker run --rm gitblit-initializer:latest cat /plugins/mcp-support-plugin-1.0.0.zip > plugin.zip
+The one-off equivalents:
 
-# Local Maven build (requires Gitblit JAR installed)
-mvn install:install-file -Dfile=lib/gitblit-1.10.0.jar -DpomFile=lib/gitblit-1.10.0.pom
-mvn clean package -DskipTests
+```bash
+cexec java mvn install:install-file -Dfile=lib/gitblit-1.10.0.jar -DpomFile=lib/gitblit-1.10.0.pom
+cexec java mvn clean package -DskipTests
 ```
 
 **Build output:** `target/mcp-support-plugin-1.0.0.zip`
 
-## Running Tests
-
-Tests are in Python using pytest:
+The container image `registry:5000/gitblit-initializer` is Jenkins' to build and
+push. To check the Dockerfile from here without tagging anything:
 
 ```bash
-cd tests
-poetry install
-poetry run pytest              # Run all tests
-poetry run pytest -v           # Verbose output
-poetry run pytest tests/test_repos.py  # Specific file
-
-# Use custom Gitblit server
-GITBLIT_URL=http://localhost:8080 poetry run pytest
+kaniko --context . --no-push
 ```
 
-Default test server: `http://10.1.2.3`
+## Running Tests
+
+`tests/` is a pytest suite driving the plugin's REST API over HTTP against a
+running Gitblit with the plugin deployed. It is deliberately **not** wired into
+`kc project test`: no KubeCoder environment has such a Gitblit, and the default
+`GITBLIT_URL` (`http://10.1.2.3`) is unreachable from the pod. CI builds with
+`-DskipTests` for the same reason, and `src/` carries no Java tests of its own.
+
+Against a Gitblit you can reach, Poetry lives in the `python` tool container:
+
+```bash
+cexec python sh -c 'cd tests && poetry install'
+cexec python sh -c 'cd tests && GITBLIT_URL=http://your-gitblit poetry run pytest'
+```
+
+See `tests/README.md` for the suite's own layout.
 
 ## Project Structure
 
@@ -124,11 +136,13 @@ Local Gitblit JAR (not in Maven Central):
 - `lib/gitblit-1.10.0.jar`
 - `lib/gitblit-1.10.0.pom`
 
-These must be installed to local Maven repo before building without Docker.
+`kc project setup` installs them into the local Maven repository; the
+Dockerfile runs the same `mvn install:install-file` step inside its build
+stage.
 
 ## Known Issues
 
-The `pathPattern` parameter in `/search/files` may cause HTML error responses instead of JSON when certain patterns are used. See `plugin_issue.md` for details.
+The `pathPattern` parameter in `/search/files` may cause HTML error responses instead of JSON when certain patterns are used.
 
 ## Federated architecture model
 
