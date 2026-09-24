@@ -51,3 +51,4 @@ Or set it in `pyproject.toml` under `[tool.pytest.ini_options]`.
 - **test_file.py** - Tests for `GET /api/.mcp-internal/file`
 - **test_search_files.py** - Tests for `GET /api/.mcp-internal/search/files`
 - **test_search_commits.py** - Tests for `GET /api/.mcp-internal/search/commits`
+- **test_health.py** - Tests for `GET /api/.mcp-internal/health`

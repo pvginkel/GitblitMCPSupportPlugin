@@ -25,9 +25,16 @@ public class ResponseWriter {
      * Write a successful JSON response.
      */
     public static void writeJson(HttpServletResponse response, Object data) throws IOException {
+        writeJson(response, HttpServletResponse.SC_OK, data);
+    }
+
+    /**
+     * Write a JSON response with the given status.
+     */
+    public static void writeJson(HttpServletResponse response, int status, Object data) throws IOException {
         response.setContentType("application/json");
         response.setCharacterEncoding("UTF-8");
-        response.setStatus(HttpServletResponse.SC_OK);
+        response.setStatus(status);
 
         PrintWriter writer = response.getWriter();
         writer.write(gson.toJson(data));

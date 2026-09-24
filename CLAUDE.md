@@ -80,7 +80,8 @@ src/main/java/com/gitblit/plugin/mcp/
 │   ├── FileHandler.java       # GET /file
 │   ├── FindFilesHandler.java  # GET /find
 │   ├── FileSearchHandler.java # GET /search/files
-│   └── CommitSearchHandler.java # GET /search/commits
+│   ├── CommitSearchHandler.java # GET /search/commits
+│   └── HealthHandler.java     # GET /health
 ├── model/                     # Response DTOs for JSON serialization
 └── util/
     └── ResponseWriter.java    # JSON response helper
@@ -98,6 +99,7 @@ Base path: `/api/.mcp-internal`
 | `/find`           | GET    | Find files by glob pattern (params: pathPattern, repos, revision, limit, offset) |
 | `/search/files`   | GET    | Search file contents (params: query, repos, pathPattern, branch, limit, offset, contextLines) |
 | `/search/commits` | GET    | Search commits (params: query, repos, authors, branch, limit, offset)   |
+| `/health`         | GET    | Find and drop dead Lucene index writers; 503 when it found any          |
 
 **Search Behavior:** When no `branch` parameter is provided, searches are automatically restricted to each repository's default branch to avoid duplicate results from multiple branches.
 
@@ -112,6 +114,8 @@ Base path: `/api/.mcp-internal`
 **Pagination:** Offset-based using `limit` and `offset` parameters. All list/search endpoints return `totalCount` and `limitHit` fields. Default limit: 50 (repos/files) or 25 (search), max limit: 100-200 depending on endpoint.
 
 **Search:** Builds Lucene queries with format `type:blob/commit AND (query) AND filters...`
+
+**Health:** `HealthHandler` reads Gitblit internals by reflection: `RepositoryManager.luceneExecutor` (the `LuceneService`) and its `writers` map, one `IndexWriter` per repository. That is why `lucene-core` 5.5.2, the version Gitblit 1.10.0 ships, is a `provided` dependency. A writer that is no longer `isOpen()` is dead, and `getTragicException()` holds the cause. `LuceneService.close(repo)` drops it together with its searcher.
 
 ## Important Constants
 

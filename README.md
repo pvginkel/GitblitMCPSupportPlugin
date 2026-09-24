@@ -87,6 +87,16 @@ Search commit history using Lucene index.
 
 At least one of `messageTerms` or `authors` must be provided.
 
+### GET /health
+
+Finds Lucene index writers that have closed themselves and drops them, so the
+next search or index run reopens them. Gitblit never replaces a closed writer,
+and until one is dropped every search spanning its repository returns no hits.
+Takes no parameters.
+
+Returns 200 when no writer is dead, and 503 when the call found and dropped
+dead ones, naming those in repositories the caller can view.
+
 ## Authentication
 
 The API supports the same authentication methods as Gitblit:

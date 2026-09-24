@@ -76,6 +76,14 @@
             <scope>provided</scope>
         </dependency>
 
+        <!-- Lucene (provided by Gitblit; /health inspects its index writers) -->
+        <dependency>
+            <groupId>org.apache.lucene</groupId>
+            <artifactId>lucene-core</artifactId>
+            <version>5.5.2</version>
+            <scope>provided</scope>
+        </dependency>
+
         <!-- JGit (provided by Gitblit) -->
         <dependency>
             <groupId>org.eclipse.jgit</groupId>
