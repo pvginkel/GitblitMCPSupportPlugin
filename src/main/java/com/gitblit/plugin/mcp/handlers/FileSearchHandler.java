@@ -339,9 +339,13 @@ public class FileSearchHandler implements RequestHandler {
     /**
      * Convert a glob pattern to a regex Pattern.
      * Supports * (any chars) and ? (single char) wildcards.
+     * A pattern without a slash matches the file name at any depth.
      */
     private Pattern globToRegex(String glob) {
         StringBuilder regex = new StringBuilder();
+        if (glob.indexOf('/') < 0) {
+            regex.append("(?:.*/)?");
+        }
         for (int i = 0; i < glob.length(); i++) {
             char c = glob.charAt(i);
             switch (c) {

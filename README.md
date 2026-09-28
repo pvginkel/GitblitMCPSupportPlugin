@@ -69,7 +69,7 @@ Search file contents using Lucene index.
 |-----------|----------|---------|-------------|
 | `query` | Yes | - | Lucene search query |
 | `repos` | No | all | Comma-separated repository names |
-| `pathPattern` | No | - | File path filter (e.g., `*.java`) |
+| `pathPattern` | No | - | File path filter (e.g., `*.java`); without a `/` it matches the file name at any depth |
 | `branch` | No | - | Branch filter |
 | `count` | No | 25 | Max results (max 100) |
 

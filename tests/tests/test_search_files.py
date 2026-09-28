@@ -249,6 +249,27 @@ class TestFileSearchEndpoint:
             assert result["path"].endswith(".cs"), \
                 f"Result {result['path']} should match *.cs pattern"
 
+    def test_path_pattern_without_slash_matches_any_depth(self, api_client, indexed_repo):
+        """A pathPattern without a slash matches the file name at any depth."""
+        response = api_client.search_files(query="*", repos=indexed_repo, limit=100)
+        assert response.status_code == 200
+        nested = [r["path"] for r in response.json()["results"] if "/" in r["path"]]
+        if not nested:
+            pytest.skip("No nested files in the indexed repository")
+
+        target = nested[0]
+        name = target.rsplit("/", 1)[1]
+        response = api_client.search_files(
+            query="*",
+            repos=indexed_repo,
+            path_pattern=name[:-1] + "*",
+            limit=100
+        )
+
+        assert response.status_code == 200
+        paths = [r["path"] for r in response.json()["results"]]
+        assert target in paths, f"{name[:-1]}* should match nested {target}"
+
     def test_context_lines_default(self, api_client, indexed_repo):
         """Test that default context lines is 10 (reduced from 100)."""
         response = api_client.search_files(query="public", repos=indexed_repo)
