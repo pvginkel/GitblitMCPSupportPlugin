@@ -3,7 +3,7 @@
 #
 # This repo has no .kubecoder/config.yaml and needs none: it is worked on as a
 # sibling of the Gitblit MCP server, whose config.yaml clones it, selects the
-# `java` toolchain it builds in, and runs `cd /work/GitblitMCPSupportPlugin &&
+# `java` toolchain it builds in and the `aac-tools` one its lint runs in, and runs `cd /work/GitblitMCPSupportPlugin &&
 # kc project setup` at pod start. This file is the whole KubeCoder footprint.
 #
 # `kc project` is cwd-bound, so run every verb from this repo's root.
@@ -36,7 +36,5 @@ projects:
       # Jenkinsfile.architecture validates it. This is a POST to
       # architecture.webathome.org, so it needs outbound HTTPS and it can fail
       # for transport reasons: exit 2 is the service being unreachable or 5xx,
-      # exit 1 is the artifact genuinely being invalid. It runs bare rather
-      # than under `cexec java` — it is a stdlib-only python3 script, and the
-      # dev container has python3.
-      - ./scripts/arch-validate.py docs/architecture/*.yaml
+      # exit 1 is the artifact genuinely being invalid.
+      - cexec aac-tools arch-validate docs/architecture/*.yaml
