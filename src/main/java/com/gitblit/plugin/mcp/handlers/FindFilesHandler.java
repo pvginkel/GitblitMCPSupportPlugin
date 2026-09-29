@@ -18,7 +18,6 @@ import org.eclipse.jgit.lib.ObjectId;
 import org.eclipse.jgit.lib.Ref;
 import org.eclipse.jgit.lib.Repository;
 import org.eclipse.jgit.revwalk.RevCommit;
-import org.eclipse.jgit.revwalk.RevWalk;
 import org.eclipse.jgit.treewalk.TreeWalk;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,6 +27,7 @@ import com.gitblit.models.RepositoryModel;
 import com.gitblit.models.UserModel;
 import com.gitblit.plugin.mcp.model.FindFilesResponse;
 import com.gitblit.plugin.mcp.util.ResponseWriter;
+import com.gitblit.utils.JGitUtils;
 import com.gitblit.utils.StringUtils;
 
 /**
@@ -93,6 +93,7 @@ public class FindFilesHandler implements RequestHandler {
         FindFilesResponse result = new FindFilesResponse();
         result.pattern = pathPattern;
         result.results = new ArrayList<>();
+        result.skipped = new ArrayList<>();
         int totalMatched = 0;  // Total matches found (for totalCount)
         int skipped = 0;       // Matches skipped due to offset
         int collected = 0;     // Matches collected for result
@@ -100,23 +101,30 @@ public class FindFilesHandler implements RequestHandler {
         // Process each repository
         for (String repoName : repos) {
             Repository repository = null;
-            RevWalk revWalk = null;
             TreeWalk treeWalk = null;
 
             try {
                 repository = gitblit.getRepository(repoName);
-                if (repository == null) continue;
+                if (repository == null) {
+                    result.skipped.add(new FindFilesResponse.SkippedRepository(repoName,
+                        "Repository could not be opened"));
+                    continue;
+                }
 
-                // Resolve revision
-                String revision = revisionParam != null ? revisionParam : "HEAD";
-                ObjectId commitId = repository.resolve(revision);
-                if (commitId == null) continue;
-
-                revWalk = new RevWalk(repository);
-                RevCommit commit = revWalk.parseCommit(commitId);
+                // Resolve revision to commit. Without a revision this is the
+                // default branch, as FileHandler resolves it: HEAD, or the most
+                // recently updated branch when HEAD does not resolve.
+                RevCommit commit = JGitUtils.getCommit(repository, revisionParam);
+                if (commit == null) {
+                    result.skipped.add(new FindFilesResponse.SkippedRepository(repoName,
+                        StringUtils.isEmpty(revisionParam)
+                            ? "Cannot resolve default branch"
+                            : "Cannot resolve revision: " + revisionParam));
+                    continue;
+                }
 
                 // Resolve the reference name for display
-                String resolvedRef = resolveRef(repository, revision, commitId);
+                String resolvedRef = resolveRef(repository, revisionParam, commit);
 
                 List<String> matches = new ArrayList<>();
 
@@ -153,9 +161,6 @@ public class FindFilesHandler implements RequestHandler {
             } finally {
                 if (treeWalk != null) {
                     treeWalk.close();
-                }
-                if (revWalk != null) {
-                    revWalk.close();
                 }
                 if (repository != null) {
                     repository.close();
@@ -201,10 +206,12 @@ public class FindFilesHandler implements RequestHandler {
      * Resolve a revision to a human-readable reference name.
      */
     private String resolveRef(Repository repository, String revision, ObjectId commitId) throws IOException {
-        // If it was HEAD, try to find the actual branch name
-        if ("HEAD".equals(revision)) {
+        // Without a revision (or with HEAD), name the branch HEAD points at,
+        // provided that is where the commit came from: a HEAD whose target
+        // does not exist resolved to another branch, found below
+        if (StringUtils.isEmpty(revision) || "HEAD".equals(revision)) {
             Ref head = repository.exactRef("HEAD");
-            if (head != null && head.isSymbolic()) {
+            if (head != null && head.isSymbolic() && commitId.equals(head.getObjectId())) {
                 return head.getTarget().getName();
             }
         }

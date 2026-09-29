@@ -103,6 +103,8 @@ Base path: `/api/.mcp-internal`
 
 **Search Behavior:** When no `branch` parameter is provided, searches are automatically restricted to each repository's default branch to avoid duplicate results from multiple branches.
 
+**Find Behavior:** When no `revision` is given, `/find` resolves each repository's default branch the way `/file` does (`JGitUtils.getCommit(repository, null)`: HEAD, or the most recently updated branch when HEAD does not resolve) and reports that branch as `revision`. A repository it cannot open or resolve is not walked; it is named in `skipped` as `{repository, reason}` instead of being dropped silently.
+
 ## Key Patterns
 
 **Handler Pattern:** Each endpoint has a dedicated handler class implementing `RequestHandler` interface with `handle(HttpServletRequest, HttpServletResponse, UserModel)` method.

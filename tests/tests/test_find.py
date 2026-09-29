@@ -253,3 +253,44 @@ class TestFindFilesEndpoint:
         assert data["totalCount"] == 0
         assert data["results"] == []
         assert data["limitHit"] is False
+
+    def test_find_skipped_is_list(self, api_client, repo_with_commits):
+        """Test that the response names skipped repositories as a list."""
+        response = api_client.find(path_pattern="*", repos=repo_with_commits)
+        assert response.status_code == 200
+
+        data = response.json()
+        assert isinstance(data["skipped"], list)
+        assert all(s["repository"] != repo_with_commits for s in data["skipped"])
+
+    def test_find_unresolvable_revision_is_skipped(self, api_client, repo_with_commits):
+        """Test that a repository whose revision does not resolve is named in skipped."""
+        revision = "refs/heads/this_branch_definitely_does_not_exist_12345"
+        response = api_client.find(path_pattern="**/*", repos=repo_with_commits, revision=revision)
+        assert response.status_code == 200
+
+        data = response.json()
+        assert data["results"] == []
+        assert data["totalCount"] == 0
+        assert len(data["skipped"]) == 1
+        assert data["skipped"][0]["repository"] == repo_with_commits
+        assert revision in data["skipped"][0]["reason"]
+
+    def test_find_default_revision_is_default_branch(self, api_client, repo_with_commits):
+        """Test that omitting revision searches the branch it reports."""
+        response = api_client.find(path_pattern="**/*", repos=repo_with_commits, limit=200)
+        assert response.status_code == 200
+
+        data = response.json()
+        if not data["results"]:
+            pytest.skip("No files found")
+
+        result = data["results"][0]
+        if not result["revision"].startswith("refs/heads/"):
+            pytest.skip("Default revision did not resolve to a branch")
+
+        response = api_client.find(
+            path_pattern="**/*", repos=repo_with_commits, limit=200, revision=result["revision"]
+        )
+        assert response.status_code == 200
+        assert response.json()["results"] == data["results"]
