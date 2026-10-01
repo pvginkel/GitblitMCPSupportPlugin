@@ -76,10 +76,23 @@
             <scope>provided</scope>
         </dependency>
 
-        <!-- Lucene (provided by Gitblit; /health inspects its index writers) -->
+        <!-- Lucene (provided by Gitblit; /health inspects its index writers,
+             the search endpoints query its indexes directly) -->
         <dependency>
             <groupId>org.apache.lucene</groupId>
             <artifactId>lucene-core</artifactId>
+            <version>5.5.2</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.lucene</groupId>
+            <artifactId>lucene-analyzers-common</artifactId>
+            <version>5.5.2</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.lucene</groupId>
+            <artifactId>lucene-queryparser</artifactId>
             <version>5.5.2</version>
             <scope>provided</scope>
         </dependency>

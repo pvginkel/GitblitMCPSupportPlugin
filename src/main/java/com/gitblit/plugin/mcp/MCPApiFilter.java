@@ -93,7 +93,9 @@ public class MCPApiFilter extends HttpRequestFilter {
 
         try {
             handleRequest(httpRequest, httpResponse);
-        } catch (Exception e) {
+        } catch (Exception | LinkageError e) {
+            // LinkageError: a class missing from Gitblit's classpath would
+            // otherwise reach the servlet container and answer in HTML.
             log.error("Error processing MCP API request: " + uri, e);
             ResponseWriter.writeError(httpResponse, HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
                 "Internal server error: " + e.getMessage());

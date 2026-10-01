@@ -83,7 +83,11 @@ src/main/java/com/gitblit/plugin/mcp/
 │   ├── CommitSearchHandler.java # GET /search/commits
 │   └── HealthHandler.java     # GET /health
 ├── model/                     # Response DTOs for JSON serialization
+├── search/
+│   ├── IndexSearch.java       # Per-repository Lucene search, merged by score
+│   └── MatchLocator.java      # Best-matching line of a hit, for its chunk
 └── util/
+    ├── LuceneServiceAccess.java # Reflection into Gitblit's LuceneService
     └── ResponseWriter.java    # JSON response helper
 ```
 
@@ -115,9 +119,9 @@ Base path: `/api/.mcp-internal`
 
 **Pagination:** Offset-based using `limit` and `offset` parameters. All list/search endpoints return `totalCount` and `limitHit` fields. Default limit: 50 (repos/files) or 25 (search), max limit: 100-200 depending on endpoint.
 
-**Search:** Builds Lucene queries with format `type:blob/commit AND (query) AND filters...`
+**Search:** `search/IndexSearch` queries Gitblit's per-repository Lucene indexes directly, never `IGitblit.search()`: that one highlights every hit with a highlighter that needs `lucene-join`, which Gitblit does not ship, so any wildcard term threw a `NoClassDefFoundError`; and it takes one query for all repositories, so filtering each to its default branch took one OR clause per repository. `IndexSearch` parses the user query once (`QueryParser`, default field `content`, leading wildcards allowed), searches each repository with its own `type` and branch filters, and merges the top hits by score. It gets each repository's searcher from `LuceneService.getIndexSearcher` by reflection (`util/LuceneServiceAccess`) and holds a reference on its reader until the `Result` is closed, since Gitblit closes readers when it indexes. `lucene-analyzers-common` and `lucene-queryparser` 5.5.2 are `provided`, as Gitblit ships them. File search chunks come from the stored `content` field; `search/MatchLocator` picks the line by tokenizing that content with Gitblit's `StandardAnalyzer` and matching the query's terms, phrases and automaton terms.
 
-**Health:** `HealthHandler` reads Gitblit internals by reflection: `RepositoryManager.luceneExecutor` (the `LuceneService`) and its `writers` map, one `IndexWriter` per repository. That is why `lucene-core` 5.5.2, the version Gitblit 1.10.0 ships, is a `provided` dependency. A writer that is no longer `isOpen()` is dead, and `getTragicException()` holds the cause. `LuceneService.close(repo)` drops it together with its searcher.
+**Health:** `HealthHandler` reads Gitblit internals by reflection, through `util/LuceneServiceAccess`: `RepositoryManager.luceneExecutor` (the `LuceneService`) and its `writers` map, one `IndexWriter` per repository. That is why `lucene-core` 5.5.2, the version Gitblit 1.10.0 ships, is a `provided` dependency. A writer that is no longer `isOpen()` is dead, and `getTragicException()` holds the cause. `LuceneService.close(repo)` drops it together with its searcher.
 
 ## Important Constants
 
@@ -145,7 +149,3 @@ Local Gitblit JAR (not in Maven Central):
 `kc project setup` installs them into the local Maven repository; the
 Dockerfile runs the same `mvn install:install-file` step inside its build
 stage.
-
-## Known Issues
-
-The `pathPattern` parameter in `/search/files` may cause HTML error responses instead of JSON when certain patterns are used.

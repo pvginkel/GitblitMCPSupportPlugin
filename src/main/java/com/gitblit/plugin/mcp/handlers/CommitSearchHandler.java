@@ -6,22 +6,31 @@ package com.gitblit.plugin.mcp.handlers;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.TimeZone;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+import org.apache.lucene.document.DateTools;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.queryparser.classic.ParseException;
+import org.apache.lucene.search.BooleanClause;
+import org.apache.lucene.search.BooleanQuery;
+import org.apache.lucene.search.Query;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.gitblit.Constants.SearchObjectType;
 import com.gitblit.manager.IGitblit;
 import com.gitblit.models.RepositoryModel;
-import com.gitblit.models.SearchResult;
 import com.gitblit.models.UserModel;
 import com.gitblit.plugin.mcp.model.CommitSearchResponse;
+import com.gitblit.plugin.mcp.search.IndexSearch;
 import com.gitblit.plugin.mcp.util.ResponseWriter;
 import com.gitblit.utils.ArrayUtils;
 import com.gitblit.utils.StringUtils;
@@ -36,6 +45,11 @@ public class CommitSearchHandler implements RequestHandler {
 
     private static final int DEFAULT_LIMIT = 25;
     private static final int MAX_LIMIT = 100;
+
+    private static final Set<String> COMMIT_FIELDS = IndexSearch.fields(
+        IndexSearch.FIELD_COMMIT, IndexSearch.FIELD_AUTHOR, IndexSearch.FIELD_COMMITTER,
+        IndexSearch.FIELD_DATE, IndexSearch.FIELD_SUMMARY, IndexSearch.FIELD_CONTENT,
+        IndexSearch.FIELD_BRANCH);
 
     private final SimpleDateFormat dateFormat;
 
@@ -83,105 +97,97 @@ public class CommitSearchHandler implements RequestHandler {
         if (limit > MAX_LIMIT) limit = MAX_LIMIT;
         if (offset < 0) offset = 0;
 
-        // Build Lucene query
-        StringBuilder luceneQuery = new StringBuilder();
-        luceneQuery.append("type:commit");
-
-        // Add the user's query (skip for wildcard queries - just match all commits)
-        if (!isWildcardQuery) {
-            luceneQuery.append(" AND (").append(query).append(")");
-        }
-
-        // Add authors filter (OR logic)
-        if (!StringUtils.isEmpty(authors)) {
-            String[] authorList = authors.split(",");
-            luceneQuery.append(" AND (");
-            for (int i = 0; i < authorList.length; i++) {
-                if (i > 0) luceneQuery.append(" OR ");
-                luceneQuery.append("author:").append(authorList[i].trim());
-            }
-            luceneQuery.append(")");
+        Query userQuery;
+        try {
+            userQuery = IndexSearch.parse(query);
+        } catch (ParseException e) {
+            ResponseWriter.writeError(response, HttpServletResponse.SC_BAD_REQUEST,
+                "Invalid query: " + e.getMessage());
+            return;
         }
 
         // Determine repositories to search
-        List<String> searchRepos = getSearchRepositories(gitblit, user, reposParam);
-
-        // Add branch filter - use explicit branch or default branches
-        if (!StringUtils.isEmpty(branch)) {
-            luceneQuery.append(" AND branch:\"").append(branch).append("\"");
-        } else {
-            // Build filter using default branch of each repository
-            StringBuilder branchFilter = new StringBuilder();
-            for (String repoName : searchRepos) {
-                RepositoryModel model = gitblit.getRepositoryModel(repoName);
-                if (model != null && !StringUtils.isEmpty(model.HEAD)) {
-                    if (branchFilter.length() > 0) {
-                        branchFilter.append(" OR ");
-                    }
-                    branchFilter.append("branch:\"").append(model.HEAD).append("\"");
-                }
-            }
-            if (branchFilter.length() > 0) {
-                luceneQuery.append(" AND (").append(branchFilter).append(")");
-            }
-        }
-
+        List<RepositoryModel> searchRepos = getSearchRepositories(gitblit, user, reposParam);
         if (searchRepos.isEmpty()) {
             ResponseWriter.writeError(response, HttpServletResponse.SC_BAD_REQUEST,
                 "No accessible indexed repositories found");
             return;
         }
 
-        // Execute search - fetch enough results to cover offset + limit
-        String finalQuery = luceneQuery.toString();
-        log.info("Commit search: user={}, query='{}', repos={}, offset={}",
-                 user.username, finalQuery, searchRepos.size(), offset);
+        StringBuilder executedQuery = new StringBuilder("type:commit");
+        if (!isWildcardQuery) {
+            executedQuery.append(" AND (").append(query).append(")");
+        }
 
-        int fetchCount = offset + limit;
-        List<SearchResult> results = gitblit.search(finalQuery, 1, fetchCount, searchRepos);
+        // Authors filter (OR logic), each author name as a phrase
+        Query authorsFilter = null;
+        if (!StringUtils.isEmpty(authors)) {
+            BooleanQuery.Builder builder = new BooleanQuery.Builder();
+            executedQuery.append(" AND (");
+            String[] authorList = authors.split(",");
+            for (int i = 0; i < authorList.length; i++) {
+                String author = authorList[i].trim();
+                builder.add(IndexSearch.phrase(IndexSearch.FIELD_AUTHOR, author), BooleanClause.Occur.SHOULD);
+                if (i > 0) executedQuery.append(" OR ");
+                executedQuery.append("author:\"").append(author).append("\"");
+            }
+            executedQuery.append(")");
+            authorsFilter = builder.build();
+        }
+
+        // Each repository is searched on the explicit branch, or else on its
+        // own default branch
+        Query typeFilter = IndexSearch.type(SearchObjectType.commit.name());
+        Query branchFilter = StringUtils.isEmpty(branch) ? null : IndexSearch.phrase(IndexSearch.FIELD_BRANCH, branch);
+        List<IndexSearch.Target> targets = new ArrayList<>();
+        for (RepositoryModel model : searchRepos) {
+            List<Query> filters = new ArrayList<>();
+            filters.add(typeFilter);
+            if (authorsFilter != null) {
+                filters.add(authorsFilter);
+            }
+            if (branchFilter != null) {
+                filters.add(branchFilter);
+            } else if (!StringUtils.isEmpty(model.HEAD)) {
+                filters.add(IndexSearch.phrase(IndexSearch.FIELD_BRANCH, model.HEAD));
+            }
+            targets.add(new IndexSearch.Target(model.name, filters));
+        }
+
+        log.info("Commit search: user={}, query='{}', repos={}, branch='{}', offset={}",
+                 user.username, executedQuery, searchRepos.size(), branch, offset);
 
         // Build response
         CommitSearchResponse searchResponse = new CommitSearchResponse();
-        searchResponse.query = finalQuery;
-        searchResponse.totalCount = results.isEmpty() ? 0 : results.get(0).totalHits;
+        searchResponse.query = executedQuery.toString();
         searchResponse.commits = new ArrayList<>();
 
-        // Process each result with offset support
-        int skipped = 0;
-        for (SearchResult sr : results) {
-            // Only include commit results
-            if (sr.type != SearchObjectType.commit) {
-                continue;
+        // Fetch enough results to cover offset + limit
+        try (IndexSearch.Result results = IndexSearch.search(targets, userQuery, offset + limit)) {
+            searchResponse.totalCount = results.totalHits;
+
+            for (int i = offset; i < results.hits.size(); i++) {
+                IndexSearch.Hit hit = results.hits.get(i);
+                Document doc = hit.document(COMMIT_FIELDS);
+
+                CommitSearchResponse.CommitInfo commitInfo = new CommitSearchResponse.CommitInfo();
+                commitInfo.repository = hit.repository;
+                commitInfo.commit = doc.get(IndexSearch.FIELD_COMMIT);
+                commitInfo.author = doc.get(IndexSearch.FIELD_AUTHOR);
+                commitInfo.committer = doc.get(IndexSearch.FIELD_COMMITTER);
+                commitInfo.date = formatDate(doc.get(IndexSearch.FIELD_DATE));
+                commitInfo.message = doc.get(IndexSearch.FIELD_CONTENT);
+                commitInfo.branch = doc.get(IndexSearch.FIELD_BRANCH);
+
+                // Extract title (first line of message)
+                String message = commitInfo.message != null ? commitInfo.message : doc.get(IndexSearch.FIELD_SUMMARY);
+                if (message != null) {
+                    int newlineIndex = message.indexOf('\n');
+                    commitInfo.title = newlineIndex >= 0 ? message.substring(0, newlineIndex) : message;
+                }
+
+                searchResponse.commits.add(commitInfo);
             }
-
-            // Skip results before offset
-            if (skipped < offset) {
-                skipped++;
-                continue;
-            }
-
-            // Stop adding results if we have enough
-            if (searchResponse.commits.size() >= limit) {
-                break;
-            }
-
-            CommitSearchResponse.CommitInfo commitInfo = new CommitSearchResponse.CommitInfo();
-            commitInfo.repository = sr.repository;
-            commitInfo.commit = sr.commitId;
-            commitInfo.author = sr.author;
-            commitInfo.committer = sr.committer;
-            commitInfo.date = sr.date != null ? dateFormat.format(sr.date) : null;
-            commitInfo.message = sr.summary;
-            commitInfo.branch = sr.branch;
-
-            // Extract title (first line of message)
-            if (sr.summary != null) {
-                int newlineIndex = sr.summary.indexOf('\n');
-                commitInfo.title = newlineIndex > 0 ?
-                    sr.summary.substring(0, newlineIndex) : sr.summary;
-            }
-
-            searchResponse.commits.add(commitInfo);
         }
 
         // Set limitHit based on whether more results exist
@@ -191,27 +197,42 @@ public class CommitSearchHandler implements RequestHandler {
     }
 
     /**
-     * Get list of repositories to search.
+     * Get the accessible, indexed repositories to search.
      */
-    private List<String> getSearchRepositories(IGitblit gitblit, UserModel user, String reposParam) {
-        // Get all accessible repositories with indexing enabled
-        List<String> available = new ArrayList<>();
+    private List<RepositoryModel> getSearchRepositories(IGitblit gitblit, UserModel user, String reposParam) {
+        Map<String, RepositoryModel> available = new HashMap<>();
         for (RepositoryModel model : gitblit.getRepositoryModels(user)) {
             if (model.hasCommits && !ArrayUtils.isEmpty(model.indexedBranches)) {
-                available.add(model.name);
+                available.put(model.name, model);
             }
         }
 
         // Filter to requested repositories
-        List<String> requested = Arrays.asList(reposParam.split(","));
-        List<String> result = new ArrayList<>();
-        for (String repo : requested) {
-            String trimmed = repo.trim();
-            if (available.contains(trimmed)) {
-                result.add(trimmed);
+        List<RepositoryModel> result = new ArrayList<>();
+        for (String repo : reposParam.split(",")) {
+            RepositoryModel model = available.get(repo.trim());
+            if (model != null) {
+                result.add(model);
             }
         }
         return result;
+    }
+
+    /**
+     * Gitblit stores the commit date as a minute-resolution DateTools string.
+     */
+    private String formatDate(String value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            Date date = DateTools.stringToDate(value);
+            synchronized (dateFormat) {
+                return dateFormat.format(date);
+            }
+        } catch (java.text.ParseException e) {
+            return null;
+        }
     }
 
     private int parseIntParam(HttpServletRequest request, String name, int defaultValue) {

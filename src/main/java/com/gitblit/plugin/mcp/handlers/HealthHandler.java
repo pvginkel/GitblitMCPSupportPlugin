@@ -4,7 +4,6 @@
 package com.gitblit.plugin.mcp.handlers;
 
 import java.io.IOException;
-import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Map;
 
@@ -16,12 +15,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.gitblit.manager.IGitblit;
-import com.gitblit.manager.IRepositoryManager;
 import com.gitblit.models.RepositoryModel;
 import com.gitblit.models.UserModel;
 import com.gitblit.plugin.mcp.model.HealthResponse;
 import com.gitblit.plugin.mcp.util.ResponseWriter;
-import com.gitblit.servlet.GitblitContext;
+import com.gitblit.plugin.mcp.util.LuceneServiceAccess;
 import com.gitblit.service.LuceneService;
 
 /**
@@ -33,8 +31,7 @@ import com.gitblit.service.LuceneService;
  * one. Once a writer dies (e.g. its write.lock fails validation), every
  * search spanning that repository logs an exception and returns no hits with
  * a 200, so a search cannot detect it. The writers sit in LuceneService's
- * private map, and LuceneService in a private field of RepositoryManager;
- * both are read by reflection.
+ * private map, read through LuceneServiceAccess.
  */
 public class HealthHandler implements RequestHandler {
 
@@ -44,8 +41,8 @@ public class HealthHandler implements RequestHandler {
     public void handle(HttpServletRequest request, HttpServletResponse response,
                        IGitblit gitblit, UserModel user) throws IOException {
 
-        LuceneService lucene = getLuceneService();
-        Map<String, IndexWriter> writers = getWriters(lucene);
+        LuceneService lucene = LuceneServiceAccess.getLuceneService();
+        Map<String, IndexWriter> writers = LuceneServiceAccess.getWriters(lucene);
 
         HealthResponse result = new HealthResponse();
         result.deadIndexes = new ArrayList<>();
@@ -91,36 +88,5 @@ public class HealthHandler implements RequestHandler {
             return "closed without a tragic exception";
         }
         return tragedy.getClass().getSimpleName() + ": " + tragedy.getMessage();
-    }
-
-    private static LuceneService getLuceneService() {
-        // Resolves to RepositoryManager, which Gitblit starts before the
-        // GitblitManager that also implements IRepositoryManager.
-        IRepositoryManager repositoryManager = GitblitContext.getManager(IRepositoryManager.class);
-        LuceneService lucene = (LuceneService) readField(repositoryManager, "luceneExecutor");
-        if (lucene == null) {
-            throw new IllegalStateException("Gitblit's Lucene service is not running");
-        }
-        return lucene;
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, IndexWriter> getWriters(LuceneService lucene) {
-        return (Map<String, IndexWriter>) readField(lucene, "writers");
-    }
-
-    private static Object readField(Object target, String name) {
-        for (Class<?> type = target.getClass(); type != null; type = type.getSuperclass()) {
-            try {
-                Field field = type.getDeclaredField(name);
-                field.setAccessible(true);
-                return field.get(target);
-            } catch (NoSuchFieldException e) {
-                // Declared further up the hierarchy, if at all
-            } catch (IllegalAccessException e) {
-                throw new IllegalStateException("Cannot read " + type.getName() + "." + name, e);
-            }
-        }
-        throw new IllegalStateException("No field " + name + " on " + target.getClass().getName());
     }
 }

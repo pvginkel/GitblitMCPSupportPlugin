@@ -5,27 +5,30 @@ package com.gitblit.plugin.mcp.handlers;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
-import org.eclipse.jgit.lib.Repository;
-import org.eclipse.jgit.revwalk.RevCommit;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.queryparser.classic.ParseException;
+import org.apache.lucene.search.Query;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import com.gitblit.Constants.SearchObjectType;
 import com.gitblit.manager.IGitblit;
 import com.gitblit.models.RepositoryModel;
-import com.gitblit.models.SearchResult;
 import com.gitblit.models.UserModel;
 import com.gitblit.plugin.mcp.model.FileSearchResponse;
+import com.gitblit.plugin.mcp.search.IndexSearch;
+import com.gitblit.plugin.mcp.search.MatchLocator;
 import com.gitblit.plugin.mcp.util.ResponseWriter;
 import com.gitblit.utils.ArrayUtils;
-import com.gitblit.utils.JGitUtils;
 import com.gitblit.utils.StringUtils;
 
 /**
@@ -40,6 +43,10 @@ public class FileSearchHandler implements RequestHandler {
     private static final int MAX_LIMIT = 100;
     private static final int DEFAULT_CONTEXT_LINES = 10;
     private static final int MAX_CONTEXT_LINES = 200;
+
+    private static final Set<String> HIT_FIELDS = IndexSearch.fields(
+        IndexSearch.FIELD_PATH, IndexSearch.FIELD_BRANCH, IndexSearch.FIELD_COMMIT);
+    private static final Set<String> CONTENT_FIELD = IndexSearch.fields(IndexSearch.FIELD_CONTENT);
 
     @Override
     public void handle(HttpServletRequest request, HttpServletResponse response,
@@ -88,240 +95,175 @@ public class FileSearchHandler implements RequestHandler {
         if (limit > MAX_LIMIT) limit = MAX_LIMIT;
         if (offset < 0) offset = 0;
 
-        // Build Lucene query
-        StringBuilder luceneQuery = new StringBuilder();
-        luceneQuery.append("type:blob");
-
-        // Add the user's query (skip for wildcard queries - just match all blobs)
-        if (!isWildcardQuery) {
-            luceneQuery.append(" AND (").append(query).append(")");
+        Query userQuery;
+        try {
+            userQuery = IndexSearch.parse(query);
+        } catch (ParseException e) {
+            ResponseWriter.writeError(response, HttpServletResponse.SC_BAD_REQUEST,
+                "Invalid query: " + e.getMessage());
+            return;
         }
 
-        // Note: pathPattern is applied as post-filter because Lucene wildcard queries
-        // with leading wildcards (like *.java) cause errors in Gitblit's highlighting code
-
-        // Compile path pattern for post-filtering
+        // Compile path pattern for post-filtering. The path field is
+        // tokenized, so a glob cannot be expressed as a Lucene query.
         Pattern pathRegex = null;
         if (!StringUtils.isEmpty(pathPattern)) {
             pathRegex = globToRegex(pathPattern);
         }
 
         // Determine repositories to search
-        List<String> searchRepos = getSearchRepositories(gitblit, user, reposParam);
-
-        // Add branch filter - use explicit branch or default branches
-        if (!StringUtils.isEmpty(branch)) {
-            luceneQuery.append(" AND branch:\"").append(branch).append("\"");
-        } else {
-            // Build filter using default branch of each repository
-            StringBuilder branchFilter = new StringBuilder();
-            for (String repoName : searchRepos) {
-                RepositoryModel model = gitblit.getRepositoryModel(repoName);
-                if (model != null && !StringUtils.isEmpty(model.HEAD)) {
-                    if (branchFilter.length() > 0) {
-                        branchFilter.append(" OR ");
-                    }
-                    branchFilter.append("branch:\"").append(model.HEAD).append("\"");
-                }
-            }
-            if (branchFilter.length() > 0) {
-                luceneQuery.append(" AND (").append(branchFilter).append(")");
-            }
-        }
-
+        List<RepositoryModel> searchRepos = getSearchRepositories(gitblit, user, reposParam);
         if (searchRepos.isEmpty()) {
             ResponseWriter.writeError(response, HttpServletResponse.SC_BAD_REQUEST,
                 "No accessible indexed repositories found");
             return;
         }
 
-        // Execute search - fetch more results if filtering or using offset
-        String finalQuery = luceneQuery.toString();
-        log.info("File search: user={}, query='{}', repos={}, pathPattern='{}', offset={}",
-                 user.username, finalQuery, searchRepos.size(), pathPattern, offset);
+        // Each repository is searched on the explicit branch, or else on its
+        // own default branch
+        Query typeFilter = IndexSearch.type(SearchObjectType.blob.name());
+        Query branchFilter = StringUtils.isEmpty(branch) ? null : IndexSearch.phrase(IndexSearch.FIELD_BRANCH, branch);
+        List<IndexSearch.Target> targets = new ArrayList<>();
+        for (RepositoryModel model : searchRepos) {
+            List<Query> filters = new ArrayList<>();
+            filters.add(typeFilter);
+            if (branchFilter != null) {
+                filters.add(branchFilter);
+            } else if (!StringUtils.isEmpty(model.HEAD)) {
+                filters.add(IndexSearch.phrase(IndexSearch.FIELD_BRANCH, model.HEAD));
+            }
+            targets.add(new IndexSearch.Target(model.name, filters));
+        }
+
+        String executedQuery = isWildcardQuery ? "type:blob" : "type:blob AND (" + query + ")";
+        log.info("File search: user={}, query='{}', repos={}, branch='{}', pathPattern='{}', offset={}",
+                 user.username, executedQuery, searchRepos.size(), branch, pathPattern, offset);
 
         // Fetch enough results to cover offset + limit, plus extra when filtering
         int fetchCount = offset + limit;
         if (pathRegex != null) fetchCount = fetchCount * 4;  // Fetch extra when filtering
         if (fetchCount > MAX_LIMIT * 4) fetchCount = MAX_LIMIT * 4;
 
-        List<SearchResult> results = gitblit.search(finalQuery, 1, fetchCount, searchRepos);
-
         // Build response
         FileSearchResponse searchResponse = new FileSearchResponse();
-        searchResponse.query = finalQuery;
+        searchResponse.query = executedQuery;
         searchResponse.results = new ArrayList<>();
 
         // Track filtered count when using pathPattern
         int filteredCount = 0;
         int skipped = 0;
 
-        // Process each result
-        for (SearchResult sr : results) {
-            // Only include blob results
-            if (sr.type != SearchObjectType.blob) {
-                continue;
-            }
+        MatchLocator locator = isWildcardQuery ? null : new MatchLocator(userQuery, IndexSearch.FIELD_CONTENT);
 
-            // Apply path pattern filter
-            if (pathRegex != null && !pathRegex.matcher(sr.path).matches()) {
-                continue;
-            }
+        try (IndexSearch.Result results = IndexSearch.search(targets, userQuery, fetchCount)) {
+            for (IndexSearch.Hit hit : results.hits) {
+                Document doc = hit.document(HIT_FIELDS);
+                String path = doc.get(IndexSearch.FIELD_PATH);
 
-            filteredCount++;
-
-            // Skip results before offset
-            if (skipped < offset) {
-                skipped++;
-                continue;
-            }
-
-            // Stop adding results if we have enough
-            if (searchResponse.results.size() >= limit) {
-                continue;  // Keep counting filtered results for totalCount
-            }
-
-            FileSearchResponse.FileSearchResult fileResult = new FileSearchResponse.FileSearchResult();
-            fileResult.repository = sr.repository;
-            fileResult.path = sr.path;
-            fileResult.branch = sr.branch;
-            fileResult.commitId = sr.commitId;
-            fileResult.chunks = new ArrayList<>();
-
-            // Fetch context chunk (skip for wildcard queries to reduce response size)
-            if (!isWildcardQuery) {
-                try {
-                    FileSearchResponse.Chunk chunk = fetchChunk(gitblit, sr, contextLines);
-                    if (chunk != null) {
-                        fileResult.chunks.add(chunk);
-                    }
-                } catch (Exception e) {
-                    log.warn("Failed to fetch context for {}:{}: {}", sr.repository, sr.path, e.getMessage());
+                // Apply path pattern filter
+                if (pathRegex != null && (path == null || !pathRegex.matcher(path).matches())) {
+                    continue;
                 }
+
+                filteredCount++;
+
+                // Skip results before offset
+                if (skipped < offset) {
+                    skipped++;
+                    continue;
+                }
+
+                // Stop adding results if we have enough
+                if (searchResponse.results.size() >= limit) {
+                    continue;  // Keep counting filtered results for totalCount
+                }
+
+                FileSearchResponse.FileSearchResult fileResult = new FileSearchResponse.FileSearchResult();
+                fileResult.repository = hit.repository;
+                fileResult.path = path;
+                fileResult.branch = doc.get(IndexSearch.FIELD_BRANCH);
+                fileResult.commitId = doc.get(IndexSearch.FIELD_COMMIT);
+                fileResult.chunks = new ArrayList<>();
+
+                // Context chunk from the indexed content (skip for wildcard
+                // queries to reduce response size)
+                if (locator != null) {
+                    try {
+                        String content = hit.document(CONTENT_FIELD).get(IndexSearch.FIELD_CONTENT);
+                        if (content != null) {
+                            fileResult.chunks.add(buildChunk(content, locator, contextLines));
+                        }
+                    } catch (IOException e) {
+                        log.warn("Failed to build context for {}:{}: {}", hit.repository, path, e.getMessage());
+                    }
+                }
+
+                searchResponse.results.add(fileResult);
             }
 
-            searchResponse.results.add(fileResult);
-        }
-
-        // Set totalCount and limitHit based on filtering
-        if (pathRegex != null) {
-            // When filtering, use the filtered count
-            searchResponse.totalCount = filteredCount;
-            searchResponse.limitHit = (offset + searchResponse.results.size()) < filteredCount;
-        } else {
-            // Without filtering, use Lucene's total
-            searchResponse.totalCount = results.isEmpty() ? 0 : results.get(0).totalHits;
-            searchResponse.limitHit = (offset + searchResponse.results.size()) < searchResponse.totalCount;
+            // Set totalCount and limitHit based on filtering
+            if (pathRegex != null) {
+                // When filtering, use the filtered count
+                searchResponse.totalCount = filteredCount;
+                searchResponse.limitHit = (offset + searchResponse.results.size()) < filteredCount;
+            } else {
+                // Without filtering, use Lucene's total
+                searchResponse.totalCount = results.totalHits;
+                searchResponse.limitHit = (offset + searchResponse.results.size()) < searchResponse.totalCount;
+            }
         }
 
         ResponseWriter.writeJson(response, searchResponse);
     }
 
     /**
-     * Get list of repositories to search.
+     * Get the accessible, indexed repositories to search.
      */
-    private List<String> getSearchRepositories(IGitblit gitblit, UserModel user, String reposParam) {
-        // Get all accessible repositories with indexing enabled
-        List<String> available = new ArrayList<>();
+    private List<RepositoryModel> getSearchRepositories(IGitblit gitblit, UserModel user, String reposParam) {
+        Map<String, RepositoryModel> available = new LinkedHashMap<>();
         for (RepositoryModel model : gitblit.getRepositoryModels(user)) {
             if (model.hasCommits && !ArrayUtils.isEmpty(model.indexedBranches)) {
-                available.add(model.name);
+                available.put(model.name, model);
             }
         }
 
         if (StringUtils.isEmpty(reposParam)) {
-            return available;
+            return new ArrayList<>(available.values());
         }
 
         // Filter to requested repositories
-        List<String> requested = Arrays.asList(reposParam.split(","));
-        List<String> result = new ArrayList<>();
-        for (String repo : requested) {
-            String trimmed = repo.trim();
-            if (available.contains(trimmed)) {
-                result.add(trimmed);
+        List<RepositoryModel> result = new ArrayList<>();
+        for (String repo : reposParam.split(",")) {
+            RepositoryModel model = available.get(repo.trim());
+            if (model != null) {
+                result.add(model);
             }
         }
         return result;
     }
 
     /**
-     * Fetch a chunk of context around the match.
+     * A chunk of context around the line that best matches the query, or
+     * around the first line when no line does (e.g. a hit on the path).
      */
-    private FileSearchResponse.Chunk fetchChunk(IGitblit gitblit, SearchResult sr, int contextLines) {
-        Repository repository = null;
-        try {
-            repository = gitblit.getRepository(sr.repository);
-            if (repository == null) {
-                return null;
-            }
+    private FileSearchResponse.Chunk buildChunk(String content, MatchLocator locator, int contextLines)
+            throws IOException {
+        String[] lines = content.split("\n", -1);
 
-            RevCommit commit = JGitUtils.getCommit(repository, sr.commitId);
-            if (commit == null) {
-                return null;
-            }
+        int matchLine = Math.max(0, locator.findLine(content, IndexSearch.analyzer(), IndexSearch.FIELD_CONTENT));
 
-            String content = JGitUtils.getStringContent(repository, commit.getTree(), sr.path);
-            if (content == null) {
-                return null;
-            }
+        // Calculate context range
+        int halfContext = contextLines / 2;
+        int startLine = Math.max(0, matchLine - halfContext);
+        int endLine = Math.min(lines.length, matchLine + halfContext + 1);
 
-            String[] lines = content.split("\n", -1);
-
-            // Find the match line using the fragment
-            int matchLine = findMatchLine(lines, sr.fragment);
-
-            // Calculate context range
-            int halfContext = contextLines / 2;
-            int startLine = Math.max(0, matchLine - halfContext);
-            int endLine = Math.min(lines.length, matchLine + halfContext + 1);
-
-            // Build chunk content with line numbers
-            StringBuilder chunkContent = new StringBuilder();
-            for (int i = startLine; i < endLine; i++) {
-                chunkContent.append(i + 1).append(": ").append(lines[i]).append("\n");
-            }
-
-            return new FileSearchResponse.Chunk(startLine + 1, endLine, chunkContent.toString());
-
-        } finally {
-            if (repository != null) {
-                repository.close();
-            }
-        }
-    }
-
-    /**
-     * Find the line number containing the match.
-     */
-    private int findMatchLine(String[] lines, String fragment) {
-        if (fragment == null || fragment.isEmpty()) {
-            return 0;
+        // Build chunk content with line numbers
+        StringBuilder chunkContent = new StringBuilder();
+        for (int i = startLine; i < endLine; i++) {
+            chunkContent.append(i + 1).append(": ").append(lines[i]).append("\n");
         }
 
-        // Clean up fragment - remove HTML highlighting tags
-        String cleanFragment = fragment.replaceAll("<[^>]+>", "").trim();
-
-        // Try exact match first
-        for (int i = 0; i < lines.length; i++) {
-            if (lines[i].contains(cleanFragment)) {
-                return i;
-            }
-        }
-
-        // Try word matching
-        String[] words = cleanFragment.split("\\s+");
-        for (String word : words) {
-            if (word.length() > 3) {
-                for (int i = 0; i < lines.length; i++) {
-                    if (lines[i].toLowerCase().contains(word.toLowerCase())) {
-                        return i;
-                    }
-                }
-            }
-        }
-
-        return 0;
+        return new FileSearchResponse.Chunk(startLine + 1, endLine, chunkContent.toString());
     }
 
     private int parseIntParam(HttpServletRequest request, String name, int defaultValue) {
