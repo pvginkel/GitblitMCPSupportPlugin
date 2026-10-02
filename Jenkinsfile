@@ -1,31 +1,62 @@
-import org.jenkinsci.plugins.pipeline.modeldefinition.Utils
+// Builds the gitblit-initializer image, which carries this repo's Gitblit plugin zip, and pins it
+// into GitSyncDeploy, which Argo CD syncs to prd.
+//
+// Controller config:
+//   - Job: Gitblit/GitblitMCPSupportPlugin
+//   - SCM: pvginkel/GitblitMCPSupportPlugin, branch main
+//   - Script Path: Jenkinsfile
 
 library identifier: 'JenkinsPipelineUtils', changelog: false
 
-podTemplate(inheritFrom: 'jenkins-agent kaniko', containers: [
-    containerTemplates.k8s('k8s')
-]) {
-    node(POD_LABEL) {
-        stage('Cloning repo') {
-            checkout scm
+pipeline {
+    agent {
+        kubernetes {
+            inheritFrom 'jenkins-agent kaniko'
+            yamlMergeStrategy merge()
+            yaml podYaml(templates: ['k8s'])
         }
+    }
 
-        stage("Building GitblitSearchApiPlugin") {
-            container('kaniko') {
-                helmCharts.kaniko([
-                    "registry:5000/gitblit-initializer:${currentBuild.number}",
-                    "registry:5000/gitblit-initializer:latest"
-                ])
+    options {
+        disableConcurrentBuilds(abortPrevious: true)
+        skipDefaultCheckout()
+        timeout(time: 60, unit: 'MINUTES')
+        timestamps()
+    }
+
+    triggers {
+        githubPush()
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
             }
         }
 
-        // The build hands its image to Argo CD by pinning it in the deploy repo (argo-cd D53);
-        // Argo syncs the commit. HelmCharts no longer deploys this app.
+        stage('Build gitblit-initializer image') {
+            steps {
+                container('kaniko') {
+                    script {
+                        helmCharts.kaniko2(destinations: [
+                            "registry:5000/gitblit-initializer:${currentBuild.number}",
+                            'registry:5000/gitblit-initializer:latest',
+                        ])
+                    }
+                }
+            }
+        }
+
         stage('Write image pins') {
-            container('k8s') {
-                cicd.writeVersionPins(repo: 'pvginkel/GitSyncDeploy', pins: [
-                    'config/prd/values.yaml': ['images.gitblitInitializer': ":${currentBuild.number}"]
-                ])
+            steps {
+                container('k8s') {
+                    script {
+                        cicd.writeVersionPins(repo: 'pvginkel/GitSyncDeploy', pins: [
+                            'config/prd/values.yaml': ['images.gitblitInitializer': ":${currentBuild.number}"],
+                        ])
+                    }
+                }
             }
         }
     }

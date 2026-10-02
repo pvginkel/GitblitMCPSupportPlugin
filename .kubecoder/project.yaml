@@ -28,7 +28,7 @@ projects:
     # reason, and src/ carries no Java tests of its own.
     #
     # The container image is not wired into `build:` either. Jenkins builds it
-    # with helmCharts.kaniko from this repo's root; from here the equivalent is
+    # with helmCharts.kaniko2 from this repo's root; from here the equivalent is
     # `kaniko --context . --no-push`, which is a minute of Maven inside the
     # builder on top of the build the verb already ran.
     lint:
