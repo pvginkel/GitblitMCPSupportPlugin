@@ -31,6 +31,7 @@ the repository root:
 ```bash
 kc project setup   # seed the Gitblit JAR into the local Maven repository
 kc project build   # cexec java mvn clean package -DskipTests
+kc project test    # build, then run tests/ against a local Gitblit (see Running Tests)
 kc project lint    # validate the architecture-as-code artifact
 ```
 
@@ -53,16 +54,33 @@ kaniko --context . --no-push
 ## Running Tests
 
 `tests/` is a pytest suite driving the plugin's REST API over HTTP against a
-running Gitblit with the plugin deployed. It is deliberately **not** wired into
-`kc project test`: no KubeCoder environment has such a Gitblit, and the default
-`GITBLIT_URL` (`http://10.1.2.3`) is unreachable from the pod. CI builds with
-`-DskipTests` for the same reason, and `src/` carries no Java tests of its own.
+running Gitblit with the plugin deployed. `kc project test` builds the plugin and
+runs `scripts/local-gitblit-test.sh`, which provides that Gitblit locally:
 
-Against a Gitblit you can reach, Poetry lives in the `python` tool container:
+- unpacks Gitblit 1.10.0 fresh under `/work/scratch/local-gitblit` (the tarball
+  is downloaded once and kept; override the directory with `LOCAL_GITBLIT_DIR`)
+- bare-clones this environment's three checkouts (`GitblitMCPServer`,
+  `GitblitMCPSupportPlugin`, `GitSyncDeploy`) into `data/git/pvginkel/`, each
+  with `gitblit.indexBranch default` so Lucene indexes it
+- installs `target/mcp-support-plugin-1.0.0.zip` and starts Gitblit in the
+  `java` tool container on port 8089, logging to `gitblit.log` in that directory
+- waits for the first Lucene index pass (about a minute after start), runs the
+  suite with `GITBLIT_URL=http://localhost:8089`, and stops Gitblit on exit
+
+The whole run takes a few minutes. Extra arguments go to pytest, so a subset
+runs after a build with:
 
 ```bash
-cexec python sh -c 'cd tests && poetry install'
-cexec python sh -c 'cd tests && GITBLIT_URL=http://your-gitblit poetry run pytest'
+kc project build
+scripts/local-gitblit-test.sh tests/test_search_files.py
+```
+
+CI builds with `-DskipTests`, and `src/` carries no Java tests of its own. To
+point the suite at another Gitblit instead (the default `GITBLIT_URL`,
+`http://10.1.2.3`, is unreachable from the pod):
+
+```bash
+cexec python sh -c 'cd tests && poetry install && GITBLIT_URL=http://your-gitblit poetry run pytest'
 ```
 
 See `tests/README.md` for the suite's own layout.

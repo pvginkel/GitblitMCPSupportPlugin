@@ -3,9 +3,12 @@
 Test suite for the Gitblit MCP Support Plugin REST API.
 
 The suite drives the API over HTTP against a **running Gitblit with this plugin
-deployed**. There is no such server in a KubeCoder environment, so the suite is
-not part of `kc project test` — there is no `test:` verb — and it has to be
-pointed at a Gitblit you can reach.
+deployed**. In KubeCoder, `kc project test` (from the repository root) builds the
+plugin and runs `scripts/local-gitblit-test.sh`, which starts a throwaway
+Gitblit 1.10.0 with the plugin on `localhost:8089`, seeded with this
+environment's three checkouts, and runs the suite against it. Arguments to the
+script go to pytest. The sections below are for running the suite by hand
+against a Gitblit you can reach.
 
 ## Setup
 

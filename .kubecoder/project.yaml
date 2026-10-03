@@ -22,12 +22,20 @@ projects:
     # the same step the Dockerfile runs. Re-running it is idempotent.
     setup: cexec java mvn install:install-file -Dfile=lib/gitblit-1.10.0.jar -DpomFile=lib/gitblit-1.10.0.pom -q
     build: cexec java mvn clean package -DskipTests
-    # No `test:`. tests/ is a pytest suite that drives this plugin's REST API
-    # over HTTP against a running Gitblit with the plugin deployed, and no
-    # KubeCoder environment has one. CI builds with -DskipTests for the same
-    # reason, and src/ carries no Java tests of its own.
-    #
-    # The container image is not wired into `build:` either. Jenkins builds it
+    # tests/ is a pytest suite that drives this plugin's REST API over HTTP
+    # against a running Gitblit with the plugin deployed. The script unpacks a
+    # throwaway Gitblit 1.10.0 under /work/scratch/local-gitblit, seeds it with
+    # this environment's three checkouts, installs the zip the first statement
+    # builds, starts it in `java` on port 8089, waits for the first Lucene
+    # index pass (about a minute) and runs the suite against it: some 3 to 5
+    # minutes in all. The build is repeated here so the suite never runs
+    # against a stale zip; `clean` removes it first, so a failed build fails
+    # the script rather than testing the last good one. CI still builds with
+    # -DskipTests, and src/ carries no Java tests of its own.
+    test:
+      - cexec java mvn clean package -DskipTests -q
+      - scripts/local-gitblit-test.sh
+    # The container image is not wired into `build:`. Jenkins builds it
     # with helmCharts.kaniko2 from this repo's root; from here the equivalent is
     # `kaniko --context . --no-push`, which is a minute of Maven inside the
     # builder on top of the build the verb already ran.
