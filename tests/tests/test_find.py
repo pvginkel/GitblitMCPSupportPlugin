@@ -294,3 +294,79 @@ class TestFindFilesEndpoint:
         )
         assert response.status_code == 200
         assert response.json()["results"] == data["results"]
+
+    def _root_files(self, api_client, repo):
+        """Return the files at the root of a repository's default branch."""
+        response = api_client.find(path_pattern="*", repos=repo, limit=200)
+        assert response.status_code == 200
+        results = response.json()["results"]
+        return results[0]["files"] if results else []
+
+    def test_find_brace_alternation(self, api_client, repo_with_commits):
+        """Test that {a,b} matches either alternative."""
+        root_files = self._root_files(api_client, repo_with_commits)
+        if len(root_files) < 2:
+            pytest.skip("Need at least 2 files at the repository root")
+        first, second = root_files[0], root_files[1]
+
+        response = api_client.find(path_pattern=f"{{{first},{second}}}", repos=repo_with_commits)
+        assert response.status_code == 200
+
+        data = response.json()
+        assert data["totalCount"] == 2
+        assert data["results"][0]["files"] == sorted([first, second])
+
+    def test_find_brace_alternation_after_double_star(self, api_client, repo_with_commits):
+        """Test that **/{a,b} matches the alternatives at the root and below."""
+        root_files = self._root_files(api_client, repo_with_commits)
+        if len(root_files) < 2:
+            pytest.skip("Need at least 2 files at the repository root")
+        first, second = root_files[0], root_files[1]
+
+        response = api_client.find(
+            path_pattern=f"**/{{{first},{second}}}", repos=repo_with_commits, limit=200
+        )
+        assert response.status_code == 200
+
+        files = response.json()["results"][0]["files"]
+        assert first in files
+        assert second in files
+        assert all(f.endswith(first) or f.endswith(second) for f in files)
+
+    def test_find_brace_alternation_with_wildcards(self, api_client, repo_with_commits):
+        """Test that *, ** and ? work inside each alternative."""
+        root_files = self._root_files(api_client, repo_with_commits)
+        if not root_files:
+            pytest.skip("No files at the repository root")
+        name = root_files[0]
+
+        response = api_client.find(
+            path_pattern="{*,this_file_definitely_does_not_exist_12345.xyz}",
+            repos=repo_with_commits, limit=200
+        )
+        assert response.status_code == 200
+        assert response.json()["results"][0]["files"] == root_files
+
+        response = api_client.find(
+            path_pattern=f"{{{name[:-1]}?,**/this_file_definitely_does_not_exist_12345.xyz}}",
+            repos=repo_with_commits
+        )
+        assert response.status_code == 200
+        assert name in response.json()["results"][0]["files"]
+
+    @pytest.mark.parametrize("pattern,construct", [
+        ("[ab]*.md", "character class '['"),
+        ("*.md]", "character class ']'"),
+        ("\\*.md", "backslash escape"),
+        ("{a,{b,c}}", "nested braces"),
+        ("{a,b", "unbalanced '{'"),
+        ("a,b}", "unbalanced '}'"),
+    ])
+    def test_find_unsupported_glob_syntax(self, api_client, repo_with_commits, pattern, construct):
+        """Test that unsupported glob syntax is an error naming it, not zero results."""
+        response = api_client.find(path_pattern=pattern, repos=repo_with_commits)
+        assert response.status_code == 400
+
+        error = response.json()["error"]
+        assert "Invalid glob pattern" in error
+        assert construct in error

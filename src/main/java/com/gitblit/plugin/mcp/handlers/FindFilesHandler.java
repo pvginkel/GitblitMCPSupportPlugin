@@ -9,7 +9,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.regex.Pattern;
-import java.util.regex.PatternSyntaxException;
 
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
@@ -53,11 +52,12 @@ public class FindFilesHandler implements RequestHandler {
             return;
         }
 
-        // Parse and validate glob pattern
+        // Parse and validate glob pattern. Unsupported syntax is an error
+        // rather than a literal match, which would answer zero results.
         Pattern matcher;
         try {
             matcher = globToRegex(pathPattern);
-        } catch (PatternSyntaxException e) {
+        } catch (IllegalArgumentException e) {
             ResponseWriter.writeError(response, HttpServletResponse.SC_BAD_REQUEST,
                 "Invalid glob pattern: " + e.getMessage());
             return;
@@ -233,11 +233,15 @@ public class FindFilesHandler implements RequestHandler {
      *   * - matches any characters except /
      *   ** - matches any characters including /
      *   ? - matches a single character except /
+     *   {a,b} - matches any one of the comma-separated alternatives
+     * Character classes, backslash escapes and nested or unbalanced braces
+     * are rejected with an IllegalArgumentException naming the construct.
      */
-    private Pattern globToRegex(String glob) throws PatternSyntaxException {
+    private Pattern globToRegex(String glob) {
         StringBuilder regex = new StringBuilder();
         regex.append("^");
 
+        int braceStart = -1;  // Index of the open '{', or -1 outside braces
         int i = 0;
         while (i < glob.length()) {
             char c = glob.charAt(i);
@@ -261,8 +265,28 @@ public class FindFilesHandler implements RequestHandler {
                 // ? matches single char except /
                 regex.append("[^/]");
                 i++;
-            } else if (c == '.' || c == '(' || c == ')' || c == '[' || c == ']' ||
-                       c == '{' || c == '}' || c == '\\' || c == '^' || c == '$' ||
+            } else if (c == '{') {
+                if (braceStart >= 0) {
+                    throw unsupported("nested braces '{'", i);
+                }
+                braceStart = i;
+                regex.append("(?:");
+                i++;
+            } else if (c == ',' && braceStart >= 0) {
+                regex.append("|");
+                i++;
+            } else if (c == '}') {
+                if (braceStart < 0) {
+                    throw unsupported("unbalanced '}'", i);
+                }
+                braceStart = -1;
+                regex.append(")");
+                i++;
+            } else if (c == '[' || c == ']') {
+                throw unsupported("character class '" + c + "'", i);
+            } else if (c == '\\') {
+                throw unsupported("backslash escape '\\'", i);
+            } else if (c == '.' || c == '(' || c == ')' || c == '^' || c == '$' ||
                        c == '|' || c == '+') {
                 // Escape regex special chars
                 regex.append("\\").append(c);
@@ -273,8 +297,17 @@ public class FindFilesHandler implements RequestHandler {
             }
         }
 
+        if (braceStart >= 0) {
+            throw unsupported("unbalanced '{'", braceStart);
+        }
+
         regex.append("$");
         return Pattern.compile(regex.toString());
+    }
+
+    private static IllegalArgumentException unsupported(String construct, int index) {
+        return new IllegalArgumentException(construct + " at index " + index
+            + " is not supported (supported: *, **, ?, {a,b})");
     }
 
     private int parseIntParam(HttpServletRequest request, String name, int defaultValue) {
