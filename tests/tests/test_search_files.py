@@ -270,6 +270,48 @@ class TestFileSearchEndpoint:
         paths = [r["path"] for r in response.json()["results"]]
         assert target in paths, f"{name[:-1]}* should match nested {target}"
 
+    def test_path_pattern_reaches_hits_beyond_the_first_search(self, api_client, indexed_repo):
+        """pathPattern is applied to every hit, not only the best 4 x (offset + limit)."""
+        response = api_client.search_files(query="*", repos=indexed_repo, limit=100)
+        assert response.status_code == 200
+        paths = [r["path"] for r in response.json()["results"]]
+
+        def matches(pattern, path):
+            if "/" in pattern:
+                return path == pattern
+            return path.rsplit("/", 1)[-1] == pattern
+
+        # A file that no better hit shares its pattern with, ranked past the
+        # 4 hits a search with limit 1 fetches first
+        targets = [
+            p for i, p in enumerate(paths)
+            if i >= 4 and not any(matches(p, q) for q in paths[:i])
+        ]
+        if not targets:
+            pytest.skip("Not enough files in the indexed repository")
+
+        target = targets[-1]
+        response = api_client.search_files(
+            query="*", repos=indexed_repo, path_pattern=target, limit=1
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert [r["path"] for r in data["results"]] == [target]
+        assert data["totalCount"] >= 1
+
+    def test_path_pattern_matching_nothing_is_a_complete_zero(self, api_client, indexed_repo):
+        """With every hit checked, an empty answer does not claim more exist."""
+        response = api_client.search_files(
+            query="*", repos=indexed_repo, path_pattern="no-such-file-*.none", limit=1
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["results"] == []
+        assert data["totalCount"] == 0
+        assert data["limitHit"] is False
+
     def test_context_lines_default(self, api_client, indexed_repo):
         """Test that default context lines is 10 (reduced from 100)."""
         response = api_client.search_files(query="public", repos=indexed_repo)

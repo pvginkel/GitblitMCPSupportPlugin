@@ -43,6 +43,8 @@ public class FileSearchHandler implements RequestHandler {
     private static final int MAX_LIMIT = 100;
     private static final int DEFAULT_CONTEXT_LINES = 10;
     private static final int MAX_CONTEXT_LINES = 200;
+    /** The most hits a search checks against a path pattern. */
+    private static final int MAX_SCAN = 10000;
 
     private static final Set<String> HIT_FIELDS = IndexSearch.fields(
         IndexSearch.FIELD_PATH, IndexSearch.FIELD_BRANCH, IndexSearch.FIELD_COMMIT);
@@ -139,11 +141,6 @@ public class FileSearchHandler implements RequestHandler {
         log.info("File search: user={}, query='{}', repos={}, branch='{}', pathPattern='{}', offset={}",
                  user.username, executedQuery, searchRepos.size(), branch, pathPattern, offset);
 
-        // Fetch enough results to cover offset + limit, plus extra when filtering
-        int fetchCount = offset + limit;
-        if (pathRegex != null) fetchCount = fetchCount * 4;  // Fetch extra when filtering
-        if (fetchCount > MAX_LIMIT * 4) fetchCount = MAX_LIMIT * 4;
-
         // Build response
         FileSearchResponse searchResponse = new FileSearchResponse();
         searchResponse.query = executedQuery;
@@ -155,62 +152,84 @@ public class FileSearchHandler implements RequestHandler {
 
         MatchLocator locator = isWildcardQuery ? null : new MatchLocator(userQuery, IndexSearch.FIELD_CONTENT);
 
-        try (IndexSearch.Result results = IndexSearch.search(targets, userQuery, fetchCount)) {
-            for (IndexSearch.Hit hit : results.hits) {
-                Document doc = hit.document(HIT_FIELDS);
-                String path = doc.get(IndexSearch.FIELD_PATH);
+        // Fetch enough hits to cover offset + limit. The path pattern can
+        // only be checked hit by hit, so when filtering, search again for
+        // more hits until offset + limit pass it, the hits run out, or
+        // MAX_SCAN hits have been checked. Each search checks only the hits
+        // the one before it did not reach.
+        int wanted = offset + limit;
+        int fetchCount = Math.min(pathRegex != null ? wanted * 4 : wanted, MAX_SCAN);
+        int scanned = 0;
+        int totalHits;
 
-                // Apply path pattern filter
-                if (pathRegex != null && (path == null || !pathRegex.matcher(path).matches())) {
-                    continue;
-                }
+        while (true) {
+            try (IndexSearch.Result results = IndexSearch.search(targets, userQuery, fetchCount)) {
+                totalHits = results.totalHits;
+                for (int i = scanned; i < results.hits.size(); i++) {
+                    IndexSearch.Hit hit = results.hits.get(i);
+                    Document doc = hit.document(HIT_FIELDS);
+                    String path = doc.get(IndexSearch.FIELD_PATH);
 
-                filteredCount++;
-
-                // Skip results before offset
-                if (skipped < offset) {
-                    skipped++;
-                    continue;
-                }
-
-                // Stop adding results if we have enough
-                if (searchResponse.results.size() >= limit) {
-                    continue;  // Keep counting filtered results for totalCount
-                }
-
-                FileSearchResponse.FileSearchResult fileResult = new FileSearchResponse.FileSearchResult();
-                fileResult.repository = hit.repository;
-                fileResult.path = path;
-                fileResult.branch = doc.get(IndexSearch.FIELD_BRANCH);
-                fileResult.commitId = doc.get(IndexSearch.FIELD_COMMIT);
-                fileResult.chunks = new ArrayList<>();
-
-                // Context chunk from the indexed content (skip for wildcard
-                // queries to reduce response size)
-                if (locator != null) {
-                    try {
-                        String content = hit.document(CONTENT_FIELD).get(IndexSearch.FIELD_CONTENT);
-                        if (content != null) {
-                            fileResult.chunks.add(buildChunk(content, locator, contextLines));
-                        }
-                    } catch (IOException e) {
-                        log.warn("Failed to build context for {}:{}: {}", hit.repository, path, e.getMessage());
+                    // Apply path pattern filter
+                    if (pathRegex != null && (path == null || !pathRegex.matcher(path).matches())) {
+                        continue;
                     }
+
+                    filteredCount++;
+
+                    // Skip results before offset
+                    if (skipped < offset) {
+                        skipped++;
+                        continue;
+                    }
+
+                    // Stop adding results if we have enough
+                    if (searchResponse.results.size() >= limit) {
+                        continue;  // Keep counting filtered results for totalCount
+                    }
+
+                    FileSearchResponse.FileSearchResult fileResult = new FileSearchResponse.FileSearchResult();
+                    fileResult.repository = hit.repository;
+                    fileResult.path = path;
+                    fileResult.branch = doc.get(IndexSearch.FIELD_BRANCH);
+                    fileResult.commitId = doc.get(IndexSearch.FIELD_COMMIT);
+                    fileResult.chunks = new ArrayList<>();
+
+                    // Context chunk from the indexed content (skip for wildcard
+                    // queries to reduce response size)
+                    if (locator != null) {
+                        try {
+                            String content = hit.document(CONTENT_FIELD).get(IndexSearch.FIELD_CONTENT);
+                            if (content != null) {
+                                fileResult.chunks.add(buildChunk(content, locator, contextLines));
+                            }
+                        } catch (IOException e) {
+                            log.warn("Failed to build context for {}:{}: {}", hit.repository, path, e.getMessage());
+                        }
+                    }
+
+                    searchResponse.results.add(fileResult);
                 }
-
-                searchResponse.results.add(fileResult);
+                scanned = Math.max(scanned, results.hits.size());
             }
 
-            // Set totalCount and limitHit based on filtering
-            if (pathRegex != null) {
-                // When filtering, use the filtered count
-                searchResponse.totalCount = filteredCount;
-                searchResponse.limitHit = (offset + searchResponse.results.size()) < filteredCount;
-            } else {
-                // Without filtering, use Lucene's total
-                searchResponse.totalCount = results.totalHits;
-                searchResponse.limitHit = (offset + searchResponse.results.size()) < searchResponse.totalCount;
+            if (filteredCount >= wanted || scanned >= totalHits || fetchCount >= MAX_SCAN) {
+                break;
             }
+            fetchCount = Math.min(fetchCount * 4, MAX_SCAN);
+        }
+
+        // Set totalCount and limitHit based on filtering
+        if (pathRegex != null) {
+            // When filtering, use the filtered count: the matches among the
+            // hits checked, a lower bound when hits were left unchecked
+            searchResponse.totalCount = filteredCount;
+            searchResponse.limitHit = scanned < totalHits
+                || (offset + searchResponse.results.size()) < filteredCount;
+        } else {
+            // Without filtering, use Lucene's total
+            searchResponse.totalCount = totalHits;
+            searchResponse.limitHit = (offset + searchResponse.results.size()) < searchResponse.totalCount;
         }
 
         ResponseWriter.writeJson(response, searchResponse);
