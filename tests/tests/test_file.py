@@ -124,3 +124,44 @@ class TestFileSizeLimit:
         response = api_client.file(repo=test_repo, path=large_file)
         assert response.status_code == 400
         assert "128KB" in response.json().get("error", "")
+
+    @pytest.fixture
+    def large_text_file(self, api_client):
+        """A text file over 128KB at the root of any repository (repo, path)."""
+        text_extensions = [".lock", ".txt", ".md", ".json", ".xml", ".yml", ".yaml", ".py", ".java", ".toml"]
+        repos = api_client.repos().json()
+        for repo in repos["repositories"]:
+            if not repo["hasCommits"]:
+                continue
+            files = api_client.files(repo=repo["name"]).json()
+            for entry in files["files"]:
+                name = entry["path"].lower()
+                if (not entry["isDirectory"] and entry.get("size", 0) > 128 * 1024
+                        and any(name.endswith(ext) for ext in text_extensions)):
+                    return repo["name"], entry["path"]
+        pytest.skip("No text file over 128KB available for testing")
+
+    def test_large_text_file_rejected_without_range(self, api_client, large_text_file):
+        """An unbounded read of a text file over 128KB is still rejected."""
+        repo, path = large_text_file
+        response = api_client.file(repo=repo, path=path)
+        assert response.status_code == 400
+        assert "128KB" in response.json().get("error", "")
+
+    def test_bounded_read_of_large_file(self, api_client, large_text_file):
+        """The limit applies to the requested lines, so a few lines of a large file are served."""
+        repo, path = large_text_file
+        response = api_client.file(repo=repo, path=path, start_line=100, end_line=104)
+        assert response.status_code == 200
+
+        lines = response.json()["content"].rstrip("\n").split("\n")
+        assert [line.split(": ", 1)[0] for line in lines] == ["100", "101", "102", "103", "104"]
+
+    def test_bounded_read_over_limit_rejected(self, api_client, large_text_file):
+        """A range whose lines exceed 128KB is rejected and says to read fewer lines."""
+        repo, path = large_text_file
+        response = api_client.file(repo=repo, path=path, start_line=2)
+        assert response.status_code == 400
+        error = response.json().get("error", "")
+        assert "128KB" in error
+        assert "startLine/endLine" in error

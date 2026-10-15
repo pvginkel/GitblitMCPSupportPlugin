@@ -85,7 +85,7 @@ public class FileHandler implements RequestHandler {
                 return;
             }
 
-            // Get raw bytes first to check size and detect binary
+            // Get raw bytes first to locate the line range and detect binary
             byte[] rawContent = JGitUtils.getByteContent(repository, commit.getTree(), path, false);
 
             if (rawContent == null) {
@@ -94,10 +94,31 @@ public class FileHandler implements RequestHandler {
                 return;
             }
 
-            // Check size limit
-            if (rawContent.length > MAX_FILE_SIZE) {
+            // Locate the requested lines in the raw bytes: [rangeStart, rangeEnd),
+            // without the newline ending the last one. A '\n' byte is never part
+            // of a multi-byte UTF-8 sequence, so the range decodes on its own.
+            int rangeStart = startLine == 1 ? 0 : -1;
+            int rangeEnd = rawContent.length;
+            int line = 1;
+            for (int i = 0; i < rawContent.length; i++) {
+                if (rawContent[i] == '\n') {
+                    if (line == endLine) {
+                        rangeEnd = i;
+                        break;
+                    }
+                    line++;
+                    if (line == startLine) {
+                        rangeStart = i + 1;
+                    }
+                }
+            }
+
+            // Check size limit against the requested lines, not the whole file
+            if (rangeStart >= 0 && rangeEnd - rangeStart > MAX_FILE_SIZE) {
+                boolean wholeFile = startLine == 1 && rangeEnd == rawContent.length;
                 ResponseWriter.writeError(response, HttpServletResponse.SC_BAD_REQUEST,
-                    "File exceeds maximum size of 128KB");
+                    (wholeFile ? "File exceeds" : "Requested lines exceed")
+                    + " maximum size of 128KB; read fewer lines with startLine/endLine");
                 return;
             }
 
@@ -108,18 +129,13 @@ public class FileHandler implements RequestHandler {
                 return;
             }
 
-            // Convert to string
-            String content = new String(rawContent, "UTF-8");
-
-            // Split into lines and apply line range
-            String[] lines = content.split("\n", -1);
-
+            // Number the requested lines; a startLine past the end reads nothing
             StringBuilder result = new StringBuilder();
-            int actualEndLine = Math.min(endLine, lines.length);
-
-            for (int i = startLine - 1; i < actualEndLine; i++) {
-                if (i >= 0 && i < lines.length) {
-                    result.append((i + 1)).append(": ").append(lines[i]).append("\n");
+            if (rangeStart >= 0) {
+                String content = new String(rawContent, rangeStart, rangeEnd - rangeStart, "UTF-8");
+                String[] lines = content.split("\n", -1);
+                for (int i = 0; i < lines.length; i++) {
+                    result.append(startLine + i).append(": ").append(lines[i]).append("\n");
                 }
             }
 
