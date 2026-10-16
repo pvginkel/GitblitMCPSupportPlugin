@@ -202,3 +202,16 @@ class TestCommitSearchEndpoint:
         # Should only have results from one branch (the default)
         assert len(branches) <= 1, \
             f"Without branch filter, should only get default branch results, got: {branches}"
+
+    def test_default_branch_when_head_names_a_missing_branch(self, api_client, renamed_default_repo):
+        """Without a branch, a repository whose HEAD names a branch it lacks
+        is searched on its most recently updated branch, as /find reads it
+        (GBMCP-9).
+        """
+        response = api_client.search_commits(query="*", repos=renamed_default_repo, limit=100)
+        assert response.status_code == 200
+
+        data = response.json()
+        assert data["commits"], "The default branch's commits should be found"
+        branches = {commit["branch"] for commit in data["commits"]}
+        assert branches == {"refs/heads/main"}

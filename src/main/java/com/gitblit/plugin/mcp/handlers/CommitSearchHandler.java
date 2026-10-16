@@ -31,6 +31,7 @@ import com.gitblit.models.RepositoryModel;
 import com.gitblit.models.UserModel;
 import com.gitblit.plugin.mcp.model.CommitSearchResponse;
 import com.gitblit.plugin.mcp.search.IndexSearch;
+import com.gitblit.plugin.mcp.util.DefaultBranch;
 import com.gitblit.plugin.mcp.util.ResponseWriter;
 import com.gitblit.utils.ArrayUtils;
 import com.gitblit.utils.StringUtils;
@@ -136,7 +137,7 @@ public class CommitSearchHandler implements RequestHandler {
         }
 
         // Each repository is searched on the explicit branch, or else on its
-        // own default branch
+        // own default branch, which RepositoryModel.HEAD may name wrongly
         Query typeFilter = IndexSearch.type(SearchObjectType.commit.name());
         Query branchFilter = StringUtils.isEmpty(branch) ? null : IndexSearch.phrase(IndexSearch.FIELD_BRANCH, branch);
         List<IndexSearch.Target> targets = new ArrayList<>();
@@ -148,8 +149,11 @@ public class CommitSearchHandler implements RequestHandler {
             }
             if (branchFilter != null) {
                 filters.add(branchFilter);
-            } else if (!StringUtils.isEmpty(model.HEAD)) {
-                filters.add(IndexSearch.phrase(IndexSearch.FIELD_BRANCH, model.HEAD));
+            } else {
+                String defaultBranch = DefaultBranch.of(gitblit, model);
+                if (!StringUtils.isEmpty(defaultBranch)) {
+                    filters.add(IndexSearch.phrase(IndexSearch.FIELD_BRANCH, defaultBranch));
+                }
             }
             targets.add(new IndexSearch.Target(model.name, filters));
         }

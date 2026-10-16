@@ -6,7 +6,8 @@ The suite drives the API over HTTP against a **running Gitblit with this plugin
 deployed**. In KubeCoder, `kc project test` (from the repository root) builds the
 plugin and runs `scripts/local-gitblit-test.sh`, which starts a throwaway
 Gitblit 1.10.0 with the plugin on `localhost:8089`, seeded with this
-environment's three checkouts, and runs the suite against it. Arguments to the
+environment's three checkouts and a fixture whose HEAD names a missing branch,
+and runs the suite against it. Arguments to the
 script go to pytest. The sections below are for running the suite by hand
 against a Gitblit you can reach.
 

@@ -4,7 +4,8 @@
 #
 # Each run unpacks a fresh Gitblit under $LOCAL_GITBLIT_DIR (the tarball is
 # downloaded once and kept), bare-clones this environment's three checkouts
-# into it with `gitblit.indexBranch default`, installs
+# into it with `gitblit.indexBranch default`, adds the RenamedDefaultBranch
+# fixture, installs
 # target/mcp-support-plugin-1.0.0.zip, starts Gitblit in the `java` tool
 # container on port 8089 and waits for the first Lucene index pass, about a
 # minute after start. Gitblit is stopped when the script exits.
@@ -23,6 +24,10 @@ GITBLIT_HOME=$WORK/gitblit-$VERSION
 LOG=$WORK/gitblit.log
 PLUGIN_ZIP=$REPO_ROOT/target/mcp-support-plugin-1.0.0.zip
 SEED_REPOS=(GitblitMCPServer GitblitMCPSupportPlugin GitSyncDeploy)
+# A mirror whose upstream renamed master to main: it holds only main, and its
+# HEAD still names refs/heads/master. Named to sort after the seeds, so tests
+# taking the first repository keep taking a seed.
+RENAMED_REPO=RenamedDefaultBranch
 # How long to wait for the first index pass, and the hard cap on Gitblit's life.
 INDEX_TIMEOUT=300
 GITBLIT_TIMEOUT=1800
@@ -57,6 +62,11 @@ for name in "${SEED_REPOS[@]}"; do
     git --git-dir="$bare" config gitblit.indexBranch default
 done
 
+bare=$GITBLIT_HOME/data/git/pvginkel/$RENAMED_REPO.git
+git clone -q --bare --no-hardlinks --single-branch --branch main /work/GitSyncDeploy "$bare"
+git --git-dir="$bare" symbolic-ref HEAD refs/heads/master
+git --git-dir="$bare" config gitblit.indexBranch default
+
 cat >> "$GITBLIT_HOME/data/gitblit.properties" <<EOF
 server.httpPort = $PORT
 server.httpsPort = 0
@@ -84,7 +94,7 @@ trap stop_gitblit EXIT
 
 log "waiting up to ${INDEX_TIMEOUT}s for the first Lucene index pass"
 deadline=$((SECONDS + INDEX_TIMEOUT))
-for name in "${SEED_REPOS[@]}"; do
+for name in "${SEED_REPOS[@]}" "$RENAMED_REPO"; do
     until grep -q "Built pvginkel/$name.git Lucene index" "$LOG"; do
         if ! kill -0 "$gitblit_pid" 2>/dev/null; then
             log "Gitblit exited before indexing; see $LOG"

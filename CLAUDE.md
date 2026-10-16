@@ -62,6 +62,9 @@ runs `scripts/local-gitblit-test.sh`, which provides that Gitblit locally:
 - bare-clones this environment's three checkouts (`GitblitMCPServer`,
   `GitblitMCPSupportPlugin`, `GitSyncDeploy`) into `data/git/pvginkel/`, each
   with `gitblit.indexBranch default` so Lucene indexes it
+- adds the fixture `pvginkel/RenamedDefaultBranch.git`: `GitSyncDeploy`'s
+  `main` alone, with a HEAD naming the missing `refs/heads/master`, as a mirror
+  keeps it after its upstream renamed master to main
 - installs `target/mcp-support-plugin-1.0.0.zip` and starts Gitblit in the
   `java` tool container on port 8089, logging to `gitblit.log` in that directory
 - waits for the first Lucene index pass (about a minute after start), runs the
@@ -105,6 +108,7 @@ src/main/java/com/gitblit/plugin/mcp/
 │   ├── IndexSearch.java       # Per-repository Lucene search, merged by score
 │   └── MatchLocator.java      # Best-matching line of a hit, for its chunk
 └── util/
+    ├── DefaultBranch.java     # A repository's default branch, as the indexer picks it
     ├── LuceneServiceAccess.java # Reflection into Gitblit's LuceneService
     └── ResponseWriter.java    # JSON response helper
 ```
@@ -123,7 +127,7 @@ Base path: `/api/.mcp-internal`
 | `/search/commits` | GET    | Search commits (params: query, repos, authors, branch, limit, offset)   |
 | `/health`         | GET    | Find and drop dead Lucene index writers; 503 when it found any          |
 
-**Search Behavior:** When no `branch` parameter is provided, searches are automatically restricted to each repository's default branch to avoid duplicate results from multiple branches.
+**Search Behavior:** When no `branch` parameter is provided, searches are automatically restricted to each repository's default branch to avoid duplicate results from multiple branches. `util/DefaultBranch` names it as `/find` and Gitblit's indexer resolve it: HEAD's target, or the most recently updated branch when that target does not exist. `RepositoryModel.HEAD` names the target either way, and Gitblit never drops a deleted branch's index documents (its delete takes a `Term` on the tokenized `branch` field), so filtering on it found only a renamed branch's stale documents.
 
 **Find Behavior:** When no `revision` is given, `/find` resolves each repository's default branch the way `/file` does (`JGitUtils.getCommit(repository, null)`: HEAD, or the most recently updated branch when HEAD does not resolve) and reports that branch as `revision`. A repository it cannot open or resolve is not walked; it is named in `skipped` as `{repository, reason}` instead of being dropped silently.
 

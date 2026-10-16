@@ -29,6 +29,19 @@ def session():
 
 
 @pytest.fixture(scope="session")
+def renamed_default_repo(api_client):
+    """A repository whose HEAD names refs/heads/master, which it lacks: it
+    holds only refs/heads/main, as a mirror does after its upstream renamed
+    master to main. Only scripts/local-gitblit-test.sh seeds it.
+    """
+    name = "pvginkel/RenamedDefaultBranch.git"
+    repos = api_client.repos(query="RenamedDefaultBranch").json()["repositories"]
+    if not any(repo["name"] == name for repo in repos):
+        pytest.skip(f"{name} is seeded only by scripts/local-gitblit-test.sh")
+    return name
+
+
+@pytest.fixture(scope="session")
 def api_client(session, api_url):
     """API client helper."""
 
