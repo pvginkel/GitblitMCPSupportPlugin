@@ -9,6 +9,8 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.SortedMap;
+import java.util.TreeMap;
 
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.TokenStream;
@@ -28,12 +30,12 @@ import org.apache.lucene.util.automaton.CharacterRunAutomaton;
 import org.apache.lucene.util.automaton.LevenshteinAutomata;
 
 /**
- * Finds the line of a text that best matches a query, by tokenizing the text
- * with the analyzer it was indexed with and matching the query's terms,
- * phrases and wildcard terms against those tokens.
+ * Finds the lines of a text that match a query, by tokenizing the text with
+ * the analyzer it was indexed with and matching the query's terms, phrases
+ * and wildcard terms against those tokens.
  *
- * The best line is the one matching the most distinct parts of the query,
- * the earliest of those on a tie. "a AND b" thus prefers a line holding both.
+ * Each line is scored by the distinct parts of the query it matches. "a AND
+ * b" thus scores a line holding both above a line holding either.
  */
 public final class MatchLocator {
 
@@ -48,12 +50,14 @@ public final class MatchLocator {
     }
 
     /**
-     * The 0-based line of text that best matches the query, or -1 when no
-     * line matches any part of it.
+     * The 0-based lines of text that match a part of the query, in line
+     * order, each with the number of distinct parts of the query it matches.
+     * Empty when no line matches any part of it.
      */
-    public int findLine(String text, Analyzer analyzer, String field) throws IOException {
+    public SortedMap<Integer, Integer> findLines(String text, Analyzer analyzer, String field) throws IOException {
+        SortedMap<Integer, Integer> scores = new TreeMap<>();
         if (matchers.isEmpty()) {
-            return -1;
+            return scores;
         }
 
         Tokens tokens = Tokens.of(text, analyzer, field);
@@ -69,17 +73,10 @@ public final class MatchLocator {
             }
         }
 
-        int best = -1;
-        int bestCount = 0;
         for (Map.Entry<Integer, Integer> entry : hitsByLine.entrySet()) {
-            int count = Integer.bitCount(entry.getValue());
-            int line = entry.getKey();
-            if (count > bestCount || (count == bestCount && line < best)) {
-                best = line;
-                bestCount = count;
-            }
+            scores.put(entry.getKey(), Integer.bitCount(entry.getValue()));
         }
-        return best;
+        return scores;
     }
 
     private void collect(Query query, String field) {

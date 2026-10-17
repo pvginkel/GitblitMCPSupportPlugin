@@ -5,10 +5,13 @@ package com.gitblit.plugin.mcp.handlers;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.SortedMap;
+import java.util.TreeMap;
 import java.util.regex.Pattern;
 
 import javax.servlet.http.HttpServletRequest;
@@ -44,6 +47,8 @@ public class FileSearchHandler implements RequestHandler {
     private static final int MAX_LIMIT = 100;
     private static final int DEFAULT_CONTEXT_LINES = 10;
     private static final int MAX_CONTEXT_LINES = 200;
+    /** The most chunks a file's result carries. */
+    private static final int MAX_CHUNKS = 10;
     /** The most hits a search checks against a path pattern. */
     private static final int MAX_SCAN = 10000;
 
@@ -199,13 +204,13 @@ public class FileSearchHandler implements RequestHandler {
                     fileResult.commitId = doc.get(IndexSearch.FIELD_COMMIT);
                     fileResult.chunks = new ArrayList<>();
 
-                    // Context chunk from the indexed content (skip for wildcard
+                    // Context chunks from the indexed content (skip for wildcard
                     // queries to reduce response size)
                     if (locator != null) {
                         try {
                             String content = hit.document(CONTENT_FIELD).get(IndexSearch.FIELD_CONTENT);
                             if (content != null) {
-                                fileResult.chunks.add(buildChunk(content, locator, contextLines));
+                                fileResult.chunks.addAll(buildChunks(content, locator, contextLines));
                             }
                         } catch (IOException e) {
                             log.warn("Failed to build context for {}:{}: {}", hit.repository, path, e.getMessage());
@@ -266,27 +271,83 @@ public class FileSearchHandler implements RequestHandler {
     }
 
     /**
-     * A chunk of context around the line that best matches the query, or
-     * around the first line when no line does (e.g. a hit on the path).
+     * The chunks of context around the lines that match the query, in line
+     * order, or one around the first line when no line does (e.g. a hit on
+     * the path).
+     *
+     * Each chunk has the window of contextLines around its first match line.
+     * A match line the chunk before already shows adds no chunk of its own,
+     * and a window that would overlap the chunk before slides past its end,
+     * so chunks never share a line and never grow past one window. Over
+     * MAX_CHUNKS, the chunks holding the lines that match the most parts of
+     * the query are kept, the earliest of those on a tie.
      */
-    private FileSearchResponse.Chunk buildChunk(String content, MatchLocator locator, int contextLines)
+    private List<FileSearchResponse.Chunk> buildChunks(String content, MatchLocator locator, int contextLines)
             throws IOException {
         String[] lines = content.split("\n", -1);
 
-        int matchLine = Math.max(0, locator.findLine(content, IndexSearch.analyzer(), IndexSearch.FIELD_CONTENT));
-
-        // Calculate context range
-        int halfContext = contextLines / 2;
-        int startLine = Math.max(0, matchLine - halfContext);
-        int endLine = Math.min(lines.length, matchLine + halfContext + 1);
-
-        // Build chunk content with line numbers
-        StringBuilder chunkContent = new StringBuilder();
-        for (int i = startLine; i < endLine; i++) {
-            chunkContent.append(i + 1).append(": ").append(lines[i]).append("\n");
+        SortedMap<Integer, Integer> matches =
+            locator.findLines(content, IndexSearch.analyzer(), IndexSearch.FIELD_CONTENT);
+        if (matches.isEmpty()) {
+            matches = new TreeMap<>(Collections.singletonMap(0, 0));
         }
 
-        return new FileSearchResponse.Chunk(startLine + 1, endLine, chunkContent.toString());
+        // Calculate context ranges
+        int halfContext = contextLines / 2;
+        List<Window> windows = new ArrayList<>();
+        int shownEnd = Integer.MIN_VALUE;
+        for (Map.Entry<Integer, Integer> match : matches.entrySet()) {
+            int matchLine = match.getKey();
+            if (matchLine < shownEnd) {
+                Window last = windows.get(windows.size() - 1);
+                last.score = Math.max(last.score, match.getValue());
+                continue;
+            }
+            int startLine = matchLine - halfContext;
+            int endLine = matchLine + halfContext + 1;
+            if (startLine < shownEnd) {
+                endLine += shownEnd - startLine;
+                startLine = shownEnd;
+            }
+            Window window = new Window(Math.max(0, startLine), Math.min(lines.length, endLine), match.getValue());
+            windows.add(window);
+            shownEnd = window.end;
+        }
+
+        if (windows.size() > MAX_CHUNKS) {
+            List<Window> best = new ArrayList<>(windows);
+            best.sort((a, b) -> a.score != b.score
+                ? Integer.compare(b.score, a.score) : Integer.compare(a.start, b.start));
+            windows = new ArrayList<>(best.subList(0, MAX_CHUNKS));
+            windows.sort((a, b) -> Integer.compare(a.start, b.start));
+        }
+
+        // Build chunk content with line numbers
+        List<FileSearchResponse.Chunk> chunks = new ArrayList<>();
+        for (Window window : windows) {
+            StringBuilder chunkContent = new StringBuilder();
+            for (int i = window.start; i < window.end; i++) {
+                chunkContent.append(i + 1).append(": ").append(lines[i]).append("\n");
+            }
+            chunks.add(new FileSearchResponse.Chunk(window.start + 1, window.end, chunkContent.toString()));
+        }
+        return chunks;
+    }
+
+    /**
+     * The 0-based lines of a chunk, end exclusive, and the best score of the
+     * match lines it shows.
+     */
+    private static final class Window {
+        final int start;
+        final int end;
+        int score;
+
+        Window(int start, int end, int score) {
+            this.start = start;
+            this.end = end;
+            this.score = score;
+        }
     }
 
     private int parseIntParam(HttpServletRequest request, String name, int defaultValue) {

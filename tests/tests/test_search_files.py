@@ -384,6 +384,37 @@ class TestFileSearchEndpoint:
         else:
             pytest.skip("No chunks in search results")
 
+    def test_chunks_per_file(self, api_client):
+        """A file answers one chunk per region of matching lines, each the
+        size of one context window, up to 10; over 10, the chunks matching
+        the most query terms win, the earliest on a tie (GBMCP-10).
+
+        The fixture holds 'zebrafinch' on lines 20, 23, 27 and every 30th
+        line from 50 to 350, and 'quokka' on line 350 alone.
+        """
+        repo = "pvginkel/GitblitMCPSupportPlugin.git"
+        fixture = "tests/fixtures/many_matches.txt"
+        if api_client.file(repo, fixture).status_code != 200:
+            pytest.skip(f"{fixture} is not in {repo} on this Gitblit")
+
+        response = api_client.search_files(
+            query="zebrafinch quokka", repos=repo, path_pattern="many_matches.txt", context_lines=10
+        )
+        assert response.status_code == 200
+
+        data = response.json()
+        assert data["totalCount"] == 1, "totalCount counts files, not matches"
+        assert [result["path"] for result in data["results"]] == [fixture]
+
+        spans = [(chunk["startLine"], chunk["endLine"]) for chunk in data["results"][0]["chunks"]]
+        assert spans == [
+            # 20 and 23 share a window; 27's window slides past it
+            (15, 25), (26, 36),
+            (45, 55), (75, 85), (105, 115), (135, 145), (165, 175), (195, 205), (225, 235),
+            # 260, 290 and 320 are dropped for 350, which matches both terms
+            (345, 355),
+        ]
+
     def test_default_branch_filtering(self, api_client, indexed_repo):
         """Test that omitting branch parameter searches only default branch.
 
