@@ -25,10 +25,11 @@ projects:
     # tests/ is a pytest suite that drives this plugin's REST API over HTTP
     # against a running Gitblit with the plugin deployed. The script unpacks a
     # throwaway Gitblit 1.10.0 under /work/scratch/local-gitblit, seeds it with
-    # this environment's three checkouts, installs the zip the first statement
-    # builds, starts it in `java` on port 8089, waits for the first Lucene
-    # index pass (about a minute) and runs the suite against it: some 3 to 5
-    # minutes in all. The build is repeated here so the suite never runs
+    # this checkout and the GitblitMCPServer and GitSyncDeploy checkouts beside
+    # it (cloned from GitHub where there are none), installs the zip the first
+    # statement builds, starts it in `java` on port 8089, waits for the first
+    # Lucene index pass (about a minute) and runs the suite against it: some 3
+    # to 5 minutes in all. The build is repeated here so the suite never runs
     # against a stale zip; `clean` removes it first, so a failed build fails
     # the script rather than testing the last good one. CI still builds with
     # -DskipTests, and src/ carries no Java tests of its own.

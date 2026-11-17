@@ -3,12 +3,16 @@
 # repo's built plugin installed. `kc project test` runs it after the build.
 #
 # Each run unpacks a fresh Gitblit under $LOCAL_GITBLIT_DIR (the tarball is
-# downloaded once and kept), bare-clones this environment's three checkouts
-# into it with `gitblit.indexBranch default`, adds the RenamedDefaultBranch
-# fixture, installs
-# target/mcp-support-plugin-1.0.0.zip, starts Gitblit in the `java` tool
-# container on port 8089 and waits for the first Lucene index pass, about a
-# minute after start. Gitblit is stopped when the script exits.
+# downloaded once and kept), bare-clones the three seed repositories into it
+# with `gitblit.indexBranch default`, adds the RenamedDefaultBranch fixture,
+# installs target/mcp-support-plugin-1.0.0.zip, starts Gitblit in the `java`
+# tool container on port 8089 and waits for the first Lucene index pass, about
+# a minute after start. Gitblit is stopped when the script exits.
+#
+# The seeds are this checkout and GitblitMCPServer and GitSyncDeploy, each
+# taken from a checkout beside this one or, where there is none, from GitHub,
+# so the suite reads the same three repositories wherever this repo is checked
+# out.
 #
 # Run it from the dev container; extra arguments go to pytest, e.g.
 #   scripts/local-gitblit-test.sh tests/test_search_files.py -k wildcard
@@ -56,14 +60,33 @@ fi
 rm -rf "$GITBLIT_HOME"
 tar xzf "$TARBALL" -C "$WORK"
 
+# Where a seed is cloned from: this checkout for the plugin itself, else a
+# checkout of the same name beside it, else GitHub (GitSyncDeploy is private
+# there, so that clone needs the environment's GitHub credential).
+seed_source() {
+    local name=$1
+    local sibling
+    sibling=$(dirname "$REPO_ROOT")/$name
+    if [[ $name == GitblitMCPSupportPlugin ]]; then
+        echo "$REPO_ROOT"
+    elif [[ -e $sibling/.git ]]; then
+        echo "$sibling"
+    else
+        echo "https://github.com/pvginkel/$name.git"
+    fi
+}
+
 for name in "${SEED_REPOS[@]}"; do
     bare=$GITBLIT_HOME/data/git/pvginkel/$name.git
-    git clone -q --bare --no-hardlinks "/work/$name" "$bare"
+    src=$(seed_source "$name")
+    log "seeding pvginkel/$name.git from $src"
+    git clone -q --bare --no-hardlinks "$src" "$bare"
     git --git-dir="$bare" config gitblit.indexBranch default
 done
 
 bare=$GITBLIT_HOME/data/git/pvginkel/$RENAMED_REPO.git
-git clone -q --bare --no-hardlinks --single-branch --branch main /work/GitSyncDeploy "$bare"
+git clone -q --bare --no-hardlinks --single-branch --branch main \
+    "$GITBLIT_HOME/data/git/pvginkel/GitSyncDeploy.git" "$bare"
 git --git-dir="$bare" symbolic-ref HEAD refs/heads/master
 git --git-dir="$bare" config gitblit.indexBranch default
 
