@@ -29,6 +29,7 @@ import com.gitblit.plugin.mcp.handlers.FilesHandler;
 import com.gitblit.plugin.mcp.handlers.FindFilesHandler;
 import com.gitblit.plugin.mcp.handlers.HealthHandler;
 import com.gitblit.plugin.mcp.handlers.ReposHandler;
+import com.gitblit.plugin.mcp.handlers.ReposRefreshHandler;
 import com.gitblit.plugin.mcp.handlers.RequestHandler;
 import com.gitblit.plugin.mcp.util.ResponseWriter;
 import com.gitblit.servlet.GitblitContext;
@@ -41,6 +42,7 @@ public class MCPApiFilter extends HttpRequestFilter {
 
     // Handlers
     private final RequestHandler reposHandler;
+    private final RequestHandler reposRefreshHandler;
     private final RequestHandler filesHandler;
     private final RequestHandler fileHandler;
     private final RequestHandler fileSearchHandler;
@@ -50,6 +52,7 @@ public class MCPApiFilter extends HttpRequestFilter {
 
     public MCPApiFilter() {
         this.reposHandler = new ReposHandler();
+        this.reposRefreshHandler = new ReposRefreshHandler();
         this.filesHandler = new FilesHandler();
         this.fileHandler = new FileHandler();
         this.fileSearchHandler = new FileSearchHandler();
@@ -75,7 +78,7 @@ public class MCPApiFilter extends HttpRequestFilter {
 
         // Set CORS headers for API access
         httpResponse.setHeader("Access-Control-Allow-Origin", "*");
-        httpResponse.setHeader("Access-Control-Allow-Methods", "GET, OPTIONS");
+        httpResponse.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
         httpResponse.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
 
         // Handle preflight requests
@@ -84,10 +87,11 @@ public class MCPApiFilter extends HttpRequestFilter {
             return;
         }
 
-        // Only allow GET requests
-        if (!"GET".equalsIgnoreCase(httpRequest.getMethod())) {
+        // GET reads; POST changes Gitblit's state
+        String method = httpRequest.getMethod();
+        if (!"GET".equalsIgnoreCase(method) && !"POST".equalsIgnoreCase(method)) {
             ResponseWriter.writeError(httpResponse, HttpServletResponse.SC_METHOD_NOT_ALLOWED,
-                "Method not allowed. Only GET requests are supported.");
+                "Method not allowed. Only GET and POST requests are supported.");
             return;
         }
 
@@ -125,19 +129,24 @@ public class MCPApiFilter extends HttpRequestFilter {
         }
 
         // Route to appropriate handler
-        RequestHandler handler = getHandler(endpoint);
+        String method = request.getMethod();
+        RequestHandler handler = getHandler(method, endpoint);
 
         if (handler == null) {
             ResponseWriter.writeError(response, HttpServletResponse.SC_NOT_FOUND,
-                "Unknown endpoint: " + endpoint);
+                "Unknown endpoint: " + method + " " + endpoint);
             return;
         }
 
-        log.debug("MCP API: user={}, endpoint={}", user.username, endpoint);
+        log.debug("MCP API: user={}, method={}, endpoint={}", user.username, method, endpoint);
         handler.handle(request, response, gitblit, user);
     }
 
-    private RequestHandler getHandler(String endpoint) {
+    private RequestHandler getHandler(String method, String endpoint) {
+        if ("POST".equalsIgnoreCase(method)) {
+            return "repos/refresh".equals(endpoint) ? reposRefreshHandler : null;
+        }
+
         // Handle empty endpoint
         if (endpoint.isEmpty()) {
             return null;

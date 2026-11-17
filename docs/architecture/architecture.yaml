@@ -4,8 +4,9 @@ producer: gitblit-initializer
 # Gitblit MCP Support Plugin (image: registry:5000/gitblit-initializer). A Gitblit
 # plugin (Java/Maven) that installs a servlet filter exposing an internal REST API
 # under /api/.mcp-internal (repos, files, file, find-files, file-search,
-# commit-search, health). The gitblit-mcp-server consumes this surface, and
-# gitblit-app's liveness probe calls health. The plugin runs inside the Gitblit
+# commit-search, health, repos/refresh). The gitblit-mcp-server consumes this
+# surface, gitblit-app's liveness probe calls health, and git-sync calls
+# repos/refresh after each run. The plugin runs inside the Gitblit
 # instance (ss:gitblit, resolved from the published dataset).
 
 applicationComponents:
@@ -27,7 +28,9 @@ applicationServices:
     label: Gitblit MCP internal API
     summary: >-
       Internal REST surface under /api/.mcp-internal exposing repo/file/commit
-      read endpoints to the Gitblit MCP server, authenticated as the calling user.
+      read endpoints to the Gitblit MCP server, authenticated as the calling user,
+      and a refresh that has Gitblit list the repositories put into its
+      repositories folder since it started.
     introduced: 2026-01-12
     lifecycle: active
 

@@ -133,6 +133,6 @@ done
 log "indexed; running pytest"
 
 cd "$REPO_ROOT"
-cexec python sh -c \
-    'cd tests && poetry install -q && exec env GITBLIT_URL="$0" poetry run pytest "$@"' \
-    "http://localhost:$PORT" "$@"
+cexec python env GITBLIT_URL="http://localhost:$PORT" \
+    GITBLIT_REPOSITORIES_FOLDER="$GITBLIT_HOME/data/git" \
+    sh -c 'cd tests && poetry install -q && exec poetry run pytest "$@"' pytest "$@"

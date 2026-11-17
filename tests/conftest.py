@@ -42,6 +42,17 @@ def renamed_default_repo(api_client):
 
 
 @pytest.fixture(scope="session")
+def repositories_folder():
+    """The running Gitblit's repositories folder, which a test adds a
+    repository to. Only scripts/local-gitblit-test.sh names it.
+    """
+    folder = os.environ.get("GITBLIT_REPOSITORIES_FOLDER")
+    if not folder:
+        pytest.skip("GITBLIT_REPOSITORIES_FOLDER is set only by scripts/local-gitblit-test.sh")
+    return folder
+
+
+@pytest.fixture(scope="session")
 def api_client(session, api_url):
     """API client helper."""
 
@@ -56,6 +67,10 @@ def api_client(session, api_url):
             response = self.session.get(url, params=params)
             return response
 
+        def post(self, endpoint):
+            """Make a POST request to the API."""
+            return self.session.post(f"{self.base_url}/{endpoint}")
+
         def repos(self, query=None, limit=None, offset=None):
             """GET /repos endpoint."""
             params = {}
@@ -66,6 +81,10 @@ def api_client(session, api_url):
             if offset is not None:
                 params["offset"] = offset
             return self.get("repos", params or None)
+
+        def refresh_repos(self):
+            """POST /repos/refresh endpoint."""
+            return self.post("repos/refresh")
 
         def files(self, repo, path=None, revision=None, limit=None, offset=None):
             """GET /files endpoint."""
