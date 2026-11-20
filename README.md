@@ -27,6 +27,10 @@ Copy the ZIP to your Gitblit plugins directory and restart Gitblit.
 
 Base path: `/api/.mcp-internal`
 
+The read endpoints answer GET and `/repos/refresh` answers POST. A method an
+endpoint does not take answers 404, and any method other than GET, POST and
+OPTIONS answers 405.
+
 ### GET /repos
 
 List repositories accessible to the authenticated user.
@@ -96,6 +100,20 @@ Takes no parameters.
 
 Returns 200 when no writer is dead, and 503 when the call found and dropped
 dead ones, naming those in repositories the caller can view.
+
+### POST /repos/refresh
+
+Has Gitblit list the repositories put into its repositories folder since it
+started. With `git.cacheRepositoryList` on, Gitblit scans that folder once, at
+start; this route makes the same scan with the same settings and loads each
+repository the list lacks, which adds it to the list. It clears no cache and
+removes nothing from the list. Calls run one at a time. Takes no parameters
+and no body, and any caller may make it, anonymous included.
+
+Returns 200 with `addedCount`, the number of repositories added, and `added`,
+the sorted names of those the caller can view. When it adds any, Gitblit logs
+`Listed N repositories added since Gitblit started`. git-sync calls it once its
+run has mirrored every owner.
 
 ## Authentication
 

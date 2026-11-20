@@ -11,6 +11,7 @@ GitblitSearchApiPlugin is a Gitblit plugin that provides REST API endpoints for 
 - Find files by glob pattern using Git tree walking
 - Full-text search of file contents using Lucene indexes
 - Commit history search with filtering by author and message
+- Have Gitblit list the repositories put into its repositories folder since it started, which git-sync asks for at the end of its run
 
 ## Technology Stack
 
@@ -59,16 +60,20 @@ runs `scripts/local-gitblit-test.sh`, which provides that Gitblit locally:
 
 - unpacks Gitblit 1.10.0 fresh under `/work/scratch/local-gitblit` (the tarball
   is downloaded once and kept; override the directory with `LOCAL_GITBLIT_DIR`)
-- bare-clones this environment's three checkouts (`GitblitMCPServer`,
-  `GitblitMCPSupportPlugin`, `GitSyncDeploy`) into `data/git/pvginkel/`, each
-  with `gitblit.indexBranch default` so Lucene indexes it
+- bare-clones the three seed repositories into `data/git/pvginkel/`, each with
+  `gitblit.indexBranch default` so Lucene indexes it, and logs where each came
+  from: `GitblitMCPSupportPlugin` from the checkout under test, `GitblitMCPServer`
+  and `GitSyncDeploy` from a checkout of that name beside it or, where there is
+  none, from GitHub (GitSyncDeploy is private there, so that clone needs the
+  environment's GitHub credential)
 - adds the fixture `pvginkel/RenamedDefaultBranch.git`: `GitSyncDeploy`'s
   `main` alone, with a HEAD naming the missing `refs/heads/master`, as a mirror
   keeps it after its upstream renamed master to main
 - installs `target/mcp-support-plugin-1.0.0.zip` and starts Gitblit in the
   `java` tool container on port 8089, logging to `gitblit.log` in that directory
 - waits for the first Lucene index pass (about a minute after start), runs the
-  suite with `GITBLIT_URL=http://localhost:8089`, and stops Gitblit on exit
+  suite with `GITBLIT_URL=http://localhost:8089` and `GITBLIT_REPOSITORIES_FOLDER`
+  naming its `data/git`, and stops Gitblit on exit
 
 The whole run takes a few minutes. Extra arguments go to pytest, so a subset
 runs after a build with:
@@ -86,6 +91,9 @@ point the suite at another Gitblit instead (the default `GITBLIT_URL`,
 cexec python sh -c 'cd tests && poetry install && GITBLIT_URL=http://your-gitblit poetry run pytest'
 ```
 
+The two `repos/refresh` tests that put a repository into Gitblit's folder skip
+there: they need `GITBLIT_REPOSITORIES_FOLDER`, which only the script sets.
+
 See `tests/README.md` for the suite's own layout.
 
 ## Project Structure
@@ -97,6 +105,7 @@ src/main/java/com/gitblit/plugin/mcp/
 ├── handlers/
 │   ├── RequestHandler.java    # Handler interface
 │   ├── ReposHandler.java      # GET /repos
+│   ├── ReposRefreshHandler.java # POST /repos/refresh
 │   ├── FilesHandler.java      # GET /files
 │   ├── FileHandler.java       # GET /file
 │   ├── FindFilesHandler.java  # GET /find
@@ -126,6 +135,9 @@ Base path: `/api/.mcp-internal`
 | `/search/files`   | GET    | Search file contents (params: query, repos, pathPattern, branch, limit, offset, contextLines) |
 | `/search/commits` | GET    | Search commits (params: query, repos, authors, branch, limit, offset)   |
 | `/health`         | GET    | Find and drop dead Lucene index writers; 503 when it found any          |
+| `/repos/refresh`  | POST   | List the repositories added to Gitblit's folder since it started (no body) |
+
+**Methods:** `getHandler` routes POST to `/repos/refresh` alone and GET to every other endpoint. A method an endpoint does not take answers 404 (`Unknown endpoint: POST repos`), and the filter answers 405 to any method other than GET, POST and OPTIONS.
 
 **Search Behavior:** When no `branch` parameter is provided, searches are automatically restricted to each repository's default branch to avoid duplicate results from multiple branches. `util/DefaultBranch` names it as `/find` and Gitblit's indexer resolve it: HEAD's target, or the most recently updated branch when that target does not exist. `RepositoryModel.HEAD` names the target either way, and Gitblit never drops a deleted branch's index documents (its delete takes a `Term` on the tokenized `branch` field), so filtering on it found only a renamed branch's stale documents.
 
@@ -144,6 +156,8 @@ Base path: `/api/.mcp-internal`
 **Search:** `search/IndexSearch` queries Gitblit's per-repository Lucene indexes directly, never `IGitblit.search()`: that one highlights every hit with a highlighter that needs `lucene-join`, which Gitblit does not ship, so any wildcard term threw a `NoClassDefFoundError`; and it takes one query for all repositories, so filtering each to its default branch took one OR clause per repository. `IndexSearch` parses the user query once (`QueryParser`, default field `content`, leading wildcards allowed), searches each repository with its own `type` and branch filters, and merges the top hits by score. It gets each repository's searcher from `LuceneService.getIndexSearcher` by reflection (`util/LuceneServiceAccess`) and holds a reference on its reader until the `Result` is closed, since Gitblit closes readers when it indexes. `lucene-analyzers-common` and `lucene-queryparser` 5.5.2 are `provided`, as Gitblit ships them. File search chunks come from the stored `content` field; `search/MatchLocator` picks the line by tokenizing that content with Gitblit's `StandardAnalyzer` and matching the query's terms, phrases and automaton terms.
 
 **Health:** `HealthHandler` reads Gitblit internals by reflection, through `util/LuceneServiceAccess`: `RepositoryManager.luceneExecutor` (the `LuceneService`) and its `writers` map, one `IndexWriter` per repository. That is why `lucene-core` 5.5.2, the version Gitblit 1.10.0 ships, is a `provided` dependency. A writer that is no longer `isOpen()` is dead, and `getTragicException()` holds the cause. `LuceneService.close(repo)` drops it together with its searcher.
+
+**Refresh:** With `git.cacheRepositoryList` on, Gitblit scans its repositories folder once, at start (`RepositoryManager.getRepositoryList()`), and after that a repository joins the list only when `getRepositoryModel` misses the cache and loads it. `ReposRefreshHandler` repeats the start's scan (`JGitUtils.getRepositoryList` with the same four settings) and calls `getRepositoryModel` for each name `hasRepository` does not know, so it only ever adds to the list and every listing in the meantime is whole. `resetRepositoryListCache()` would empty the list, size, metrics and commit caches, and listings would come back partial while the next one reloaded every repository. Calls are serialized under `REFRESH_LOCK`: two at once would load one model on two threads, and `ObjectCache.updateObject` sets an entry's date before its object, so `updateLastChangeFields` on the second thread can unbox a null size.
 
 ## Important Constants
 
