@@ -66,10 +66,12 @@ class TestFileSearchEndpoint:
         else:
             pytest.skip("No chunks in search results")
 
-    def test_search_with_path_pattern(self, api_client, indexed_repo):
-        """Test search with path pattern filter."""
+    def test_search_with_path_pattern(self, api_client):
+        """Test search with path pattern filter, in this repo, which holds
+        Java files."""
+        repo = "pvginkel/GitblitMCPSupportPlugin.git"
         # First verify there are Java files by searching without pattern
-        response = api_client.search_files(query="public", repos=indexed_repo)
+        response = api_client.search_files(query="public", repos=repo)
         assert response.status_code == 200
         unfiltered_data = response.json()
 
@@ -82,7 +84,7 @@ class TestFileSearchEndpoint:
         # Now search with path pattern
         response = api_client.search_files(
             query="public",
-            repos=indexed_repo,
+            repos=repo,
             path_pattern="*.java"
         )
         assert response.status_code == 200
